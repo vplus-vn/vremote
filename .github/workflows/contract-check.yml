@@ -1,0 +1,22 @@
+name: VRemote Contract Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate OpenAPI YAML
+        run: python - <<'PY'
+          import pathlib
+          import yaml
+          for p in [pathlib.Path('api/vremote/openapi.yaml'), pathlib.Path('api/vremote/asyncapi.yaml')]:
+              yaml.safe_load(p.read_text())
+              print('valid:', p)
+          PY
+      - name: Verify contract files are present
+        run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
