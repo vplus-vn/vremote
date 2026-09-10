@@ -1,0 +1,215 @@
+asyncapi: 2.6.0
+info:
+  title: VRemote — Realtime channels (WebSocket)
+  version: 0.0.1
+  description: |
+    Hai kênh WS của VRemote:
+      - `/signaling` : Console/Viewer ↔ Backend — trung chuyển SDP/ICE cho WebRTC. Xác thực bằng `sessionToken`.
+      - `/agent`     : VRemote Agent (box) ↔ Backend — nhận lệnh ĐÃ KÝ và gửi kết quả + telemetry. Xác thực bằng device-token.
+    Media + input đi trực tiếp qua WebRTC, KHÔNG qua WS.
+servers:
+  local:
+    url: wss://vremote.example
+    protocol: wss
+channels:
+  /signaling:
+    description: Console/Viewer ↔ Backend (đàm phán WebRTC)
+    parameters: {}
+    publish:
+      operationId: fromClientSignaling
+      summary: Client → server
+      message:
+        oneOf:
+          - $ref: "#/components/messages/Join"
+          - $ref: "#/components/messages/Offer"
+          - $ref: "#/components/messages/Answer"
+          - $ref: "#/components/messages/Candidate"
+          - $ref: "#/components/messages/Leave"
+    subscribe:
+      operationId: toClientSignaling
+      summary: Server → client
+      message:
+        oneOf:
+          - $ref: "#/components/messages/Offer"
+          - $ref: "#/components/messages/Answer"
+          - $ref: "#/components/messages/Candidate"
+          - $ref: "#/components/messages/SessionState"
+          - $ref: "#/components/messages/SignalError"
+  /agent:
+    description: VRemote Agent (box) ↔ Backend (kênh điều khiển box)
+    publish:
+      operationId: fromAgent
+      summary: Box → backend
+      message:
+        oneOf:
+          - $ref: "#/components/messages/AgentHello"
+          - $ref: "#/components/messages/CommandResult"
+          - $ref: "#/components/messages/Telemetry"
+          - $ref: "#/components/messages/AgentSignaling"
+    subscribe:
+      operationId: toAgent
+      summary: Backend → box (ĐÃ KÝ)
+      message:
+        oneOf:
+          - $ref: "#/components/messages/SessionEnable"
+          - $ref: "#/components/messages/SessionDisable"
+          - $ref: "#/components/messages/Command"
+          - $ref: "#/components/messages/AgentSignaling"
+components:
+  messages:
+    Join:
+      name: join
+      payload:
+        type: object
+        required: [type, sessionToken]
+        properties:
+          type: { type: string, const: join }
+          sessionToken: { type: string, description: "cấp bởi POST /sessions hoặc embedToken" }
+    Offer:
+      name: offer
+      payload:
+        type: object
+        required: [type, sessionId, sdp]
+        properties:
+          type: { type: string, const: offer }
+          sessionId: { type: string }
+          sdp: { type: string }
+    Answer:
+      name: answer
+      payload:
+        type: object
+        required: [type, sessionId, sdp]
+        properties:
+          type: { type: string, const: answer }
+          sessionId: { type: string }
+          sdp: { type: string }
+    Candidate:
+      name: candidate
+      payload:
+        type: object
+        required: [type, sessionId, candidate]
+        properties:
+          type: { type: string, const: candidate }
+          sessionId: { type: string }
+          candidate: { type: object, description: "ICE candidate (sdpMid, sdpMLineIndex, candidate)" }
+    Leave:
+      name: leave
+      payload:
+        type: object
+        required: [type, sessionId]
+        properties:
+          type: { type: string, const: leave }
+          sessionId: { type: string }
+    SessionState:
+      name: session.state
+      payload:
+        type: object
+        required: [type, sessionId, state]
+        properties:
+          type: { type: string, const: session.state }
+          sessionId: { type: string }
+          state: { type: string, enum: [connecting, connected, relayed, closed, expired, error] }
+          rttMs: { type: integer, nullable: true }
+          ttlLeftSec: { type: integer, nullable: true }
+    SignalError:
+      name: error
+      payload:
+        type: object
+        required: [type, code]
+        properties:
+          type: { type: string, const: error }
+          code: { type: string, enum: [unauthorized, session_not_found, expired, capacity, internal] }
+          detail: { type: string, nullable: true }
+    SessionEnable:
+      name: session.enable
+      summary: Backend → box — bật pipeline cho phiên (ký, signing.md §2)
+      payload:
+        type: object
+        required: [type, deviceId, sessionId, capability, ttlSec, nonce, ts, sig]
+        properties:
+          type: { type: string, const: session.enable }
+          deviceId: { type: string }
+          sessionId: { type: string }
+          capability: { type: string, enum: [view, control] }
+          ttlSec: { type: integer }
+          nonce: { type: string }
+          ts: { type: integer }
+          sig: { type: string, description: "HMAC theo signing.md §2" }
+    SessionDisable:
+      name: session.disable
+      summary: Backend → box — đóng phiên
+      payload:
+        type: object
+        required: [type, deviceId, sessionId, nonce, ts, sig]
+        properties:
+          type: { type: string, const: session.disable }
+          deviceId: { type: string }
+          sessionId: { type: string }
+          nonce: { type: string }
+          ts: { type: integer }
+          sig: { type: string }
+    Command:
+      name: command
+      summary: Backend → box — lệnh fleet-ops (ký, signing.md §3)
+      payload:
+        type: object
+        required: [type, deviceId, commandId, cmdType, nonce, ts, sig]
+        properties:
+          type: { type: string, const: command }
+          deviceId: { type: string }
+          commandId: { type: string }
+          cmdType:
+            type: string
+            enum: [health, version, ping, logs, config-read, restart-app, reboot, config-push, apk-update, cache-clear, remote.enable, remote.disable]
+          args: { type: object, nullable: true, description: "argsJson băm vào argsHash khi ký" }
+          nonce: { type: string }
+          ts: { type: integer }
+          sig: { type: string, description: "HMAC theo signing.md §3" }
+    CommandResult:
+      name: command.result
+      summary: Box → backend — kết quả lệnh
+      payload:
+        type: object
+        required: [type, deviceId, commandId, result]
+        properties:
+          type: { type: string, const: command.result }
+          deviceId: { type: string }
+          commandId: { type: string }
+          result: { type: string, enum: [done, rejected, invalid_signature, replay_detected, gated_off, error, timeout] }
+          data: { type: object, nullable: true, description: "vd health/version/log tail (không secret)" }
+          detail: { type: string, nullable: true }
+    AgentHello:
+      name: agent.hello
+      summary: Box → backend — đăng ký/heartbeat khi kết nối
+      payload:
+        type: object
+        required: [type, deviceId, agentVersion]
+        properties:
+          type: { type: string, const: agent.hello }
+          deviceId: { type: string }
+          agentVersion: { type: string }
+          platform: { type: string, enum: [android, linux] }
+          capabilities: { type: array, items: { type: string, enum: [screen.view, screen.control, fleet] } }
+    Telemetry:
+      name: telemetry
+      summary: Box → backend — nhịp tình trạng
+      payload:
+        type: object
+        required: [type, deviceId, ts]
+        properties:
+          type: { type: string, const: telemetry }
+          deviceId: { type: string }
+          ts: { type: integer }
+          online: { type: boolean }
+          activeSessions: { type: integer, nullable: true }
+          metrics: { type: object, nullable: true, description: "cpu/mem/temp… (không secret)" }
+    AgentSignaling:
+      name: agent.signaling
+      summary: Box ↔ backend — SDP/ICE của box
+      payload:
+        type: object
+        required: [type, sessionId, payload]
+        properties:
+          type: { type: string, const: agent.signaling }
+          sessionId: { type: string }
+          payload: { type: object, description: "offer/answer/candidate (đối ứng với /signaling)" }
