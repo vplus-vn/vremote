@@ -1,0 +1,248 @@
+openapi: 3.1.0
+info:
+  title: VRemote — Backend API (điều khiển edge box từ xa)
+  version: 0.0.1
+  description: |
+    Hợp đồng HTTP giữa Console/Sản-phẩm-tích-hợp và **VRemote Backend**.
+    Nguồn sự thật: `DSG-VREMOTE-001`. Ký lệnh box: `signing.md`.
+    Nguyên tắc:
+      - Xác thực người dùng bằng **identity chuẩn vplus** (Bearer). Quyền vào = gói VRemote + role `edge.admin.*`.
+      - **Backend là nơi duy nhất mở phiên** (ký `session.enable` cho box, cấp `sessionToken` cho web).
+      - FE/console/sản phẩm tích hợp **KHÔNG** ký lệnh box.
+      - Sản phẩm khác **KHÔNG** nói trực tiếp với box — chỉ qua API này (một cửa + audit).
+      - `accepted` (202) ở /commands nghĩa là ĐÃ nhận + ký + chuyển box; kết quả cuối trả sau/hoặc qua audit.
+servers:
+  - url: https://vremote.example/api/v1
+    description: VRemote Backend (thay host theo deploy)
+security:
+  - vplusBearer: []
+paths:
+  /sessions:
+    post:
+      summary: Mở phiên remote (view/control) cho 1 box
+      operationId: openSession
+      description: |
+        Kiểm entitlement + quyền (`edge.admin.view`/`.control`). Backend tạo phiên,
+        ký `session.enable` gửi box (xem asyncapi `/agent`), sinh `sessionToken` (phạm vi hẹp, TTL)
+        cho phía web dùng `join` signaling + credential TURN ephemeral.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenSessionRequest" }
+      responses:
+        "201":
+          description: Đã mở phiên
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionGrant" }
+        "401": { description: chưa xác thực }
+        "403": { description: thiếu gói VRemote hoặc thiếu quyền (view/control) }
+        "404": { description: deviceId không tồn tại }
+        "409": { description: xung đột — vd đã có người control (với capability=control) }
+        "503": { description: box offline }
+  /sessions/{sessionId}:
+    delete:
+      summary: Đóng phiên (gửi session.disable cho box)
+      operationId: closeSession
+      parameters:
+        - { name: sessionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: đã đóng }
+        "404": { description: không tồn tại }
+  /devices:
+    get:
+      summary: Danh sách box (registry)
+      operationId: listDevices
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [online, offline, all], default: all } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Device" } }
+                  nextCursor: { type: string, nullable: true }
+  /devices/{deviceId}:
+    get:
+      summary: Chi tiết + trạng thái 1 box
+      operationId: getDevice
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/Device" } } }
+        "404": { description: không tồn tại }
+  /devices/{deviceId}/commands:
+    post:
+      summary: Gửi lệnh fleet-ops tới 1 box (an toàn/gated)
+      operationId: sendCommand
+      description: |
+        Backend kiểm quyền (gated cần quyền cao + xác nhận), **ký** (`signing.md` §3),
+        chuyển box qua asyncapi `/agent`. Idempotent theo `commandId` (backend sinh nếu không gửi).
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandRequest" }
+      responses:
+        "202":
+          description: Đã nhận + ký + chuyển box (chưa hẳn xong)
+          content: { application/json: { schema: { $ref: "#/components/schemas/CommandAck" } } }
+        "400": { description: rejected / payload không hợp lệ }
+        "403": { description: thiếu quyền (gated) }
+        "409": { description: replay_detected (commandId trùng) }
+        "503": { description: box offline }
+  /audit:
+    get:
+      summary: Truy vấn audit (phiên + lệnh)
+      operationId: queryAudit
+      parameters:
+        - { name: deviceId, in: query, required: false, schema: { type: string } }
+        - { name: actor, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
+                  nextCursor: { type: string, nullable: true }
+  /integrations/sessions:
+    post:
+      summary: (Tích hợp) Sản phẩm khác mở phiên xem/điều khiển 1 thiết bị
+      operationId: openIntegrationSession
+      description: |
+        Cho Smart Retail/vplus-ai. Nhận `machineCode` (hoặc `deviceId`) → map → tạo phiên,
+        trả **embedToken** (phạm vi hẹp: 1 device, 1 capability, TTL) + `viewerUrl` để nhúng.
+        Danh tính xuyên sản phẩm qua SSO vplus; KHÔNG nâng quyền vượt tài khoản.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntegrationSessionRequest" }
+      responses:
+        "201":
+          description: Đã cấp token nhúng
+          content: { application/json: { schema: { $ref: "#/components/schemas/EmbedGrant" } } }
+        "403": { description: thiếu quyền / phạm vi }
+        "404": { description: machineCode/deviceId không map được }
+        "503": { description: box offline }
+components:
+  securitySchemes:
+    vplusBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token identity chuẩn vplus (SSO). Backend kiểm entitlement gói VRemote + role.
+  schemas:
+    OpenSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceId, capability]
+      properties:
+        deviceId: { type: string, example: DEV-001 }
+        capability: { type: string, enum: [view, control] }
+        preferredMaxFps: { type: integer, nullable: true, description: "gợi ý FPS tiết kiệm băng thông" }
+    SessionGrant:
+      type: object
+      required: [sessionId, capability, signalingUrl, sessionToken, iceServers, ttlSec]
+      properties:
+        sessionId: { type: string, example: S-1001 }
+        capability: { type: string, enum: [view, control] }
+        signalingUrl: { type: string, example: "wss://vremote.example/signaling" }
+        sessionToken: { type: string, description: "token phạm vi hẹp để join signaling (KHÁC session.enable ký cho box)" }
+        iceServers:
+          type: array
+          items: { $ref: "#/components/schemas/IceServer" }
+        ttlSec: { type: integer, example: 1800 }
+    IceServer:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          oneOf:
+            - { type: string }
+            - { type: array, items: { type: string } }
+          example: ["turn:turn.vremote.example:3478"]
+        username: { type: string, nullable: true, description: "ephemeral (TURN)" }
+        credential: { type: string, nullable: true, description: "ephemeral (TURN), TTL ngắn" }
+    Device:
+      type: object
+      required: [deviceId, status]
+      properties:
+        deviceId: { type: string, example: DEV-001 }
+        machineCode: { type: string, nullable: true, description: "map sang định danh Smart Retail" }
+        name: { type: string, nullable: true }
+        platform: { type: string, enum: [android, linux], nullable: true }
+        status: { type: string, enum: [online, offline] }
+        agentVersion: { type: string, nullable: true }
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+        activeSessions: { type: integer, nullable: true }
+    CommandRequest:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [health, version, ping, logs, config-read, restart-app, reboot, config-push, apk-update, cache-clear, remote.enable, remote.disable]
+        args: { type: object, nullable: true, description: "tuỳ type; băm vào argsHash khi ký (signing.md §3)" }
+        commandId: { type: string, nullable: true, description: "client có thể tự cấp để idempotent; nếu không backend sinh" }
+        confirm: { type: boolean, nullable: true, description: "bắt buộc true cho lệnh GATED" }
+    CommandAck:
+      type: object
+      required: [commandId, accepted]
+      properties:
+        commandId: { type: string, example: CMD-0001 }
+        accepted: { type: boolean }
+        result:
+          type: string
+          enum: [accepted, rejected, invalid_signature, replay_detected, gated_off, device_offline, timeout, done, error]
+        detail: { type: string, nullable: true }
+    AuditEntry:
+      type: object
+      required: [id, ts, actor, action]
+      properties:
+        id: { type: string }
+        ts: { type: string, format: date-time }
+        actor: { type: string, description: "userId/subject (không PII nhạy cảm)" }
+        action: { type: string, example: "session.open" }
+        deviceId: { type: string, nullable: true }
+        sessionId: { type: string, nullable: true }
+        commandType: { type: string, nullable: true }
+        capability: { type: string, nullable: true }
+        source: { type: string, nullable: true, description: "console | integration:<productId>" }
+        result: { type: string, nullable: true }
+    IntegrationSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [capability]
+      properties:
+        machineCode: { type: string, nullable: true, description: "định danh Smart Retail; hoặc dùng deviceId" }
+        deviceId: { type: string, nullable: true }
+        capability: { type: string, enum: [view, control] }
+        productId: { type: string, nullable: true, description: "sản phẩm gọi (để audit): smart-retail | vplus-ai …" }
+    EmbedGrant:
+      type: object
+      required: [embedToken, viewerUrl, capability, ttlSec]
+      properties:
+        embedToken: { type: string, description: "phạm vi hẹp: 1 deviceId + 1 capability + TTL" }
+        viewerUrl: { type: string, example: "https://vremote.example/embed?token=..." }
+        deviceId: { type: string }
+        capability: { type: string, enum: [view, control] }
+        ttlSec: { type: integer, example: 900 }
