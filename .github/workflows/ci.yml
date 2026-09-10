@@ -1,0 +1,44 @@
+name: VRemote CI
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify contract files
+        run: |
+          test -f api/vremote/openapi.yaml
+          test -f api/vremote/asyncapi.yaml
+          test -f api/vremote/signing.md
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3' }
+      - run: composer install --no-interaction --prefer-dist
+      - run: vendor/bin/pint --test
+      - run: php artisan test
+  console:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: console } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm, cache-dependency-path: console/package.json }
+      - run: npm install
+      - run: npm run build
+  signaling:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: signaling } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm, cache-dependency-path: signaling/package.json }
+      - run: npm install
+      - run: npm run build
