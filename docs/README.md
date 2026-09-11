@@ -11,6 +11,7 @@ Tài liệu canonical của **VRemote** — hệ thống quản trị và điề
 | Yêu cầu | [`requirements/REQ-VREMOTE-001-remote-admin.md`](requirements/REQ-VREMOTE-001-remote-admin.md) |
 | Kiến trúc domain | [`design/DSG-VREMOTE-001-remote-admin-architecture.md`](design/DSG-VREMOTE-001-remote-admin-architecture.md) |
 | Chuẩn hóa v0.2.0 | [`design/DSG-VREMOTE-002-platform-standardization.md`](design/DSG-VREMOTE-002-platform-standardization.md) |
+| Góp ý tích hợp platform | [`PLATFORM-INTEGRATION-FEEDBACK.md`](PLATFORM-INTEGRATION-FEEDBACK.md) — bài học + đề xuất gửi `vplus-platform/core-lib` |
 | Trạng thái (canonical) | [`implementation/STATUS.md`](implementation/STATUS.md) |
 | Runbook (nội bộ) | [`implementation/RUNBOOK.md`](implementation/RUNBOOK.md) |
 
