@@ -1,11 +1,42 @@
 services:
+  backend:
+    image: composer:2
+    working_dir: /app
+    command: sh -c "composer install --no-interaction --prefer-dist && php artisan serve --host=0.0.0.0 --port=8080"
+    volumes: [./backend:/app]
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      VREMOTE_DEV_AUTH: "true"
+      VREMOTE_DEV_ACTOR: local-admin
+      VREMOTE_SESSION_SECRET: change-me-session-secret
+      VREMOTE_SIGNALING_URL: ws://localhost:8787/signaling
+      VREMOTE_SIGNALING_INTERNAL_URL: http://signaling:8788
+      VREMOTE_SIGNALING_INTERNAL_SECRET: change-me-internal-secret
+      VREMOTE_STUN_URL: stun:stun.l.google.com:19302
+      VREMOTE_DEVICES_JSON: '{"DEV-001":{"machineCode":"DEMO-001","name":"Demo Android Box","platform":"android","status":"online","agentVersion":"0.2.0","deviceToken":"demo-device-token"}}'
+    ports: ["8080:8080"]
+  console:
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes: [./console:/app]
+    ports: ["5173:5173"]
+    depends_on: [backend]
   signaling:
     image: node:24-alpine
     working_dir: /app
-    command: sh -c "npm ci && npm run build && npm start"
+    command: sh -c "npm install && npm run build && npm start"
     volumes: [./signaling:/app:ro]
-    environment: { PORT: "8787" }
+    environment:
+      PORT: "8787"
+      INTERNAL_PORT: "8788"
+      VREMOTE_SESSION_SECRET: change-me-session-secret
+      VREMOTE_SIGNALING_INTERNAL_SECRET: change-me-internal-secret
+      VREMOTE_DEVICES_JSON: '{"DEV-001":{"deviceToken":"demo-device-token"}}'
     ports: ["8787:8787"]
+    expose: ["8788"]
   turn:
     image: coturn/coturn:4.8.0
     command: -n --log-file=stdout --fingerprint --no-cli --no-tls --no-dtls --lt-cred-mech --realm=vremote.local
