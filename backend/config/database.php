@@ -18,10 +18,6 @@ return [
                 'database' => env('MONGODB_AUTHENTICATION_DATABASE', env('MONGODB_DATABASE', 'vremote')),
             ],
         ],
-        // Kept for local/testing convenience; not used in production.
-                'database' => env('MONGODB_AUTHENTICATION_DATABASE', env('MONGODB_DATABASE', 'vremote')),
-            ],
-        ],
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
