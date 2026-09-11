@@ -3,25 +3,37 @@
 ## Implemented
 
 - Contract v0.0.1 retained under `api/vremote`.
-- Platform baseline documented from `vplus-platform/control`, `sab-com-vn/platform-service`, and `sab-com-vn/admin-portal`.
-- Laravel backend baseline and REST route boundary.
-- Contract-compatible HMAC signer with golden-vector unit tests.
-- React/Vite console registry shell.
-- Kotlin Android agent baseline with foreground service and safe screen-off default.
-- WebSocket signaling relay: join + peer relay; media/input are never transported by this service.
-- Local coturn compose service.
+- Laravel 13 backend runtime with scoped session tokens and REST session/device/command endpoints.
+- Vplus bearer JWT verification boundary; development auth is explicitly local-only.
+- Backend-only HMAC signing with contract golden vectors.
+- Backend → signaling internal control channel for signed `session.enable`/`session.disable`/commands.
+- Authenticated signaling: viewer session-token verification and outbound agent device-token authentication.
+- Browser WebRTC viewer: SDP/ICE exchange and remote video rendering.
+- Android agent: MediaProjection screen capture, libwebrtc peer connection, outbound-only WebSocket, signed session-enable verification, timestamp skew and nonce replay protection.
+- Ephemeral TURN credentials using coturn shared-secret authentication.
+- Docker Compose runnable stack: backend, console, signaling and TURN.
+- CI covers backend, console, signaling and Android build/test.
 
 ## Security gates
 
-- Backend-only signing remains an invariant.
-- Nonce/timestamp validation is specified by `api/vremote/signing.md`; production session issuance must enforce it at the agent boundary.
-- No inbound listener is added to the Android agent.
-- GATED operations remain disabled until explicit authorization policy exists.
+- No inbound listener is added to the Android agent; it initiates the WebSocket connection.
+- Screen capture is OFF until a valid backend-signed `session.enable` is accepted.
+- Backend is the only signer for box commands.
+- `edge.admin.view` and `edge.admin.control` remain separate.
+- GATED operations require explicit confirmation and remain off by default.
+- Device secrets are not returned by the device API.
 
 ## Verification
 
-The signing implementation is covered by the three contract golden vectors and tamper tests. Full application build/test requires dependency installation in CI/runner; repository CI should execute backend PHPUnit, console TypeScript/Vite build, signaling TypeScript build, and Android Gradle tests.
+Signing golden vectors are unit-tested. CI is configured to build the full stack and Android APK. The runnable development path is `docker compose up --build` followed by Android agent configuration and MediaProjection consent.
 
-## Remaining production work
+## Remaining production hardening
 
-P1 still requires real platform identity middleware, persistent registry/session/audit repositories, authenticated signaling tokens, ephemeral TURN credentials, actual browser WebRTC media pipeline, and Android MediaProjection/libwebrtc capture. These are implementation milestones, not contract changes. R1 input injection remains P2.
+- Replace the development JSON registry with the shared platform registry/storage capability.
+- Complete the exact vplus SSO/permission claim mapping with the deployed identity issuer/public key.
+- Add durable audit/event storage and fleet command result persistence.
+- Deploy WSS/HTTPS behind the Vplus ingress and use a managed secret store.
+- Complete P2 input injection only after the required Android R1 PoC is approved.
+- Add production multi-device/fleet operations and integration embed flow in P3.
+
+These are deployment/product hardening items; `api/vremote` 0.0.1 remains unchanged.
