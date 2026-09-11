@@ -15,7 +15,8 @@ Nguyên tắc:
 - Backend VRemote là nơi duy nhất cấp phép mở phiên, ký HMAC và cấp TTL.
 - Box mặc định không chia sẻ màn hình; chỉ bật khi có phiên hợp lệ.
 - Box chỉ outbound tới signaling/TURN, không mở inbound.
-- Device thuộc **một Owner Tenant tại một thời điểm**, không gắn ownership trực tiếp với một User. Một Device có thể được nhiều User/Principal truy cập theo Role/Permission/Scope hoặc Access Grant.
+- Device thuộc **một Owner Tenant tại một thời điểm**, không gắn ownership trực tiếp với một User. Nhiều User/Principal có thể được cấp quyền truy cập Device theo role/permission/scope.
+- VPLUS Support hoặc Tenant khác chỉ được truy cập khi có **delegated/access grant** hợp lệ; đây không phải multi-tenant ownership.
 - `VREMOTE_PLATFORM_URL` là điểm tích hợp Platform duy nhất; không có `VREMOTE_PLATFORM_MODE` và không dựng silo account/auth riêng cho VRemote.
 
 ## 2. Tổ chức repo
@@ -35,7 +36,7 @@ Hai repo tách code. VRemote Agent và VBridge chỉ liên hệ qua OS superviso
 - Supervisor VBridge với restart/update và rollback.
 - Provisioning runtime cho key, endpoint và config; không hardcode secret.
 - Mặc định TẮT screen, chỉ bật khi backend ủy quyền.
-- Sau enrollment, Agent giữ **Device Identity + credential lâu dài** trong secure storage của OS; enrollment credential không được dùng cho các lần kết nối thông thường.
+- Lưu Device Identity/credential dài hạn trong secure OS storage/keystore; enrollment credential không được dùng thay cho runtime identity.
 
 Artifact Android: `vremote-agent.apk`, device-owner/foreground service/BOOT_COMPLETED. Linux triển khai sau bằng JVM/native + systemd.
 
@@ -47,11 +48,10 @@ STUN dùng để dò địa chỉ công khai. TURN/coturn relay khi P2P thất b
 
 ### 3.4 Backend
 - Platform identity/authentication adapter.
-- Device enrollment, durable identity và runtime registry.
+- Device enrollment và runtime registry.
 - Session/token: token phạm vi hẹp theo device/capability/TTL.
 - Device runtime state và map `deviceId ↔ machineCode`.
 - Fleet-ops API.
-- Device access/transfer/support-access policy.
 - Audit.
 - Integration API cho sản phẩm khác.
 
@@ -94,9 +94,9 @@ Sản phẩm khác gọi `POST /integrations/sessions` với `machineCode/device
 - Quyền tách `edge.admin.view`, `edge.admin.control` và gated.
 - Gated mặc định TẮT + xác nhận + quyền cao + audit.
 - Secret/provisioning nạp runtime; không log secret/PIN/OTP/credential/key.
-- Enrollment credential là credential **tạm thời của quá trình enroll**, không phải password tài khoản người dùng và không phải credential dùng cho session thường ngày.
-- Device credential dài hạn phải được lưu trong secure storage của Agent, có lifecycle rotation/revocation/recovery.
+- Enrollment credential là credential tạm thời, không phải password tài khoản người dùng.
 - QR không chứa secret dài hạn; nếu chứa enrollment token thì token phải one-time/TTL ngắn và được invalidated sau khi bind thành công.
+- Device Credential là identity dài hạn của Device, được lưu trong secure storage/keystore và có lifecycle rotate/revoke/recover.
 
 ## 6. API / Contract surface
 
@@ -121,75 +121,47 @@ Embeddable viewer: `<vremote-viewer token=... capability=...>` hoặc iframe v�
 
 VRemote không dựng silo account. Platform chịu trách nhiệm identity/authentication, User, Tenant, Role/Permission và scope. VRemote nhận identity context từ Platform Contract, tối thiểu gồm `userId`, `tenantId` và permissions/scopes cần thiết để quyết định truy cập Device.
 
-### 7.1 Ownership chuẩn
+### Ownership rule
 
-Một Device/Terminal thuộc **đúng một Owner Tenant tại một thời điểm**. Đây là ownership/security boundary của resource. Không mô hình hóa `Device → User` như ownership trực tiếp và không mặc định cho một Device đồng thời thuộc nhiều Tenant.
-
-```text
-Tenant A
-├── Sites
-│   └── Areas / Lines
-│       └── Devices
-└── Users
-    └── Roles / Permissions / Scope
-```
-
-Một Device có thể được nhiều User/Principal trong Owner Tenant truy cập:
+**Một Device có đúng một `ownerTenantId` tại một thời điểm.** Device không thuộc đồng thời nhiều Tenant. Nhiều User/Principal có thể quản lý cùng Device thông qua authorization/access policy.
 
 ```text
 Tenant A
-├── User A1 → DEV-001 (view + control)
-├── User A2 → DEV-001 (view)
-└── User A3 → DEV-001 (admin)
+├── Users
+│   ├── Admin
+│   ├── Manager
+│   └── Operator
+│
+└── Devices
+    └── DEV-001
+         ▲
+         │ Access Grant
+         └── VPLUS Support / delegated principal (nếu được cấp)
 ```
 
-### 7.2 Delegated / Support Access
+Nếu cần Tenant khác hỗ trợ, dùng **delegated access grant** có phạm vi, thời hạn và audit; không biến Device thành multi-tenant ownership.
 
-Nếu một Tenant khác, VPLUS Support hoặc đơn vị vận hành cần hỗ trợ Device, sử dụng **Access Grant / Delegated Access**, không tạo ownership Tenant thứ hai.
+### User access
 
-```text
-DEV-001
-Owner Tenant: A
+Một Device có thể được nhiều User trong cùng Tenant truy cập theo Role/Permission/Scope. Thêm/xóa User, đổi Role/Scope hoặc cấp Support Access **không làm thay đổi enrollment và không yêu cầu enroll lại Device**.
 
-Access Grants:
-├── Tenant A / Users A1,A2 → theo Role/Scope
-└── VPLUS Support → view/control, TTL giới hạn
-```
+### Device transfer
 
-Support access phải có actor, reason/ticket nếu áp dụng, capability, scope, `grantedAt`, `expiresAt`, revoke và audit. Hết TTL thì quyền tự mất. Tenant B/Support không được xem dữ liệu của Tenant A ngoài phạm vi grant.
-
-### 7.3 Transfer giữa Tenant
-
-Chuyển Device từ Tenant A sang Tenant B là **Transfer/Re-assignment**, không phải enrollment lại theo mặc định.
+Chuyển Device từ Tenant A sang Tenant B là một workflow domain riêng. Transfer thay đổi ownership (`ownerTenantId`) nhưng giữ nguyên Device Identity/credential nếu credential còn hợp lệ và chính sách bảo mật cho phép. Không được dùng việc đổi User để thực hiện transfer.
 
 ```text
-DEV-001
-   │
-   ▼
-Tenant A
-   │
-   │ Transfer request
-   ▼
+Tenant A / DEV-001
+        │
+        │ Transfer request + authorization
+        ▼
 TRANSFER_PENDING
-   │
-   ├── A xác nhận release
-   └── B xác nhận accept (nếu policy yêu cầu)
-   │
-   ▼
-Tenant B
+        │
+        ├── approve/reject
+        ▼
+Tenant B / DEV-001
 ```
 
-Transfer phải:
-- Giữ nguyên `deviceId`/Device Identity và lịch sử kỹ thuật của Device.
-- Thay đổi `ownerTenantId` theo transaction/audit nguyên tử.
-- Revoke các Access Grant không còn hợp lệ của Tenant A.
-- Không tự động cho Tenant B xem dữ liệu lịch sử thuộc Tenant A nếu policy/data isolation không cho phép.
-- Có audit `DEVICE_TRANSFER` với fromTenant, toTenant, actor, approver và timestamp.
-- Có thể yêu cầu credential rotation sau transfer theo policy bảo mật.
-
-Device chỉ trở về enrollment/re-provisioning khi mất hoặc reset Device Identity/credential, factory reset, thiết bị bị retired/revoked hoặc policy bảo mật yêu cầu. **Thêm User, đổi Role, cấp Support Access hoặc Transfer Tenant không mặc định yêu cầu re-enrollment.**
-
-VRemote chỉ kiểm tra quyền/scope đối với Device khi thực hiện enrollment, session, command hoặc các thao tác domain tương ứng; Platform không phải proxy cho toàn bộ VRemote API.
+Lịch sử/audit phải giữ được việc transfer; dữ liệu domain của Tenant A không mặc nhiên được Tenant B xem lại.
 
 ## 8. Data model (phác)
 
@@ -199,35 +171,17 @@ VRemote chỉ kiểm tra quyền/scope đối với Device khi thực hiện enr
 - Device ownership/scope ở cấp Platform Contract/Registry khi cần cho việc phân quyền.
 
 ### VRemote-owned domain
-- `device`: deviceId, **ownerTenantId**, machineCode, name, platform, status, agentVersion, publicKeyId, enrollmentState, identityState, lastSeenAt, createdAt.
+- `device`: deviceId, **ownerTenantId**, machineCode, name, platform, status, agentVersion, publicKeyId, enrollmentState, credentialState, lastSeenAt, createdAt.
 - `session`: sessionId, deviceId, userId, tenantId, capability, source, startedAt, endedAt, endReason, ttl.
 - `audit`: id, ts, actor, tenantId, action, deviceId, sessionId, commandType, result, meta(no-secret).
 - `command`: commandId, deviceId, type, args(no-secret), signedAt, nonce, result, status.
-- `enrollment`: enrollmentId, deviceId, targetTenantId, method, status, createdAt, expiresAt, consumedAt, createdBy; không lưu secret/token plaintext dài hạn.
-- `device_access_grant`: grantId, deviceId, granteePrincipal/tenant, capabilities, scope, reason/reference, grantedAt, expiresAt, revokedAt, createdBy; không lưu credential secret.
-- `device_transfer`: transferId, deviceId, fromTenantId, toTenantId, status, initiatedBy, approvedBy, createdAt, completedAt, reason; audit đầy đủ.
+- `enrollment`: enrollmentId, deviceId, tenantId, method, status, createdAt, expiresAt, consumedAt, createdBy; không lưu secret/token plaintext dài hạn.
+- `device_access_grant`: grantId, deviceId, principal/tenant, permissions, scope, expiresAt, revokedAt, createdBy; dùng cho delegated/support access, không thay thế ownerTenantId.
+- `device_transfer`: transferId, deviceId, fromTenantId, toTenantId, status, requestedBy, approvedBy, createdAt, completedAt, reason.
 
 ## 9. Enrollment
 
-Enrollment là quy trình **bind một VRemote Agent/Device vào một Owner Tenant và Device Registry của VRemote**, sau đó thiết lập **Device Identity + long-lived Device Credential** để Device có thể kết nối outbound tới VRemote. Enrollment không phải đăng nhập User vào Agent và **không phải thao tác lặp lại cho mỗi lần sử dụng/quản lý**.
-
-Mục tiêu vận hành:
-
-```text
-ENROLL 1 LẦN
-     │
-     ▼
-DEVICE ACTIVE
-     │
-     ├── reconnect
-     ├── reboot
-     ├── session mới
-     ├── user mới / role mới
-     ├── support access
-     └── transfer tenant
-          │
-          └── KHÔNG re-enroll mặc định
-```
+Enrollment là quy trình **bind một VRemote Agent/Device vào Tenant và Device Registry của VRemote lần đầu**, sau đó thiết lập Device Identity/credential dài hạn để Device có thể kết nối outbound tới VRemote. Enrollment không phải đăng nhập User vào Agent và **không phải thao tác lặp lại cho mỗi lần sử dụng/quản lý**.
 
 VRemote hỗ trợ **đồng thời hai phương án enrollment**, để phù hợp cả triển khai tại chỗ và triển khai từ xa:
 
@@ -245,7 +199,7 @@ Admin/Operator → Console/Mobile → scan QR
                                 ▼
                          VRemote Backend
                                 │
-                    kiểm Owner Tenant + quyền + TTL
+                    kiểm Tenant + quyền + TTL
                                 │
                                 ▼
                          Enrollment approve
@@ -254,10 +208,8 @@ Admin/Operator → Console/Mobile → scan QR
                          Device bound Tenant
                                 │
                                 ▼
-                   generate/bind Device Identity
-                                │
-                                ▼
-                     store durable credential
+                    tạo/bind Device Identity
+                    + long-lived credential
                                 │
                                 ▼
                          Agent reconnect
@@ -297,7 +249,7 @@ Device ID / Enrollment Code
 Enrollment Token / Password
 ```
 
-Backend xác thực enrollment credential, kiểm tra Owner Tenant + quyền + TTL và bind Device.
+Backend xác thực enrollment credential, kiểm tra Tenant + quyền + TTL và bind Device.
 
 Nguyên tắc:
 - `Device ID` chỉ là identifier, không phải secret.
@@ -306,39 +258,8 @@ Nguyên tắc:
 - Không sử dụng password này làm password đăng nhập User.
 - Không log token/password.
 - Sau khi bind thành công, enrollment credential phải bị vô hiệu hóa.
-- Sau bind, Agent sử dụng Device Identity/Credential lâu dài đã được provision; **không yêu cầu operator nhập lại enrollment token/password cho mỗi session**.
 
-### 9.3 Device Identity và long-lived credential
-
-Enrollment phải tạo/bind một Device Identity ổn định và credential dùng cho runtime reconnect. Ưu tiên Agent tự tạo key pair trên thiết bị và giữ private key trong secure storage/keystore; backend chỉ lưu public key hoặc key reference cần thiết.
-
-```text
-First Enrollment
-      │
-      ├── Device ID / machineCode
-      ├── one-time enrollment credential
-      └── Device key pair / identity
-              │
-              ▼
-       BOUND / ACTIVE
-              │
-              ▼
-       durable runtime auth
-              │
-      ┌───────┼────────┐
-      ▼       ▼        ▼
-   reconnect session   command
-```
-
-Credential runtime phải:
-- Không phụ thuộc User cụ thể.
-- Không phải password của OS.
-- Không gửi/lưu private key ở backend nếu Agent có thể tự giữ key.
-- Có rotation, revocation và recovery/re-provisioning.
-- Có thể bị revoke khi Device bị retire, mất kiểm soát hoặc vi phạm policy.
-- Sau rotation, Agent reconnect bằng credential mới mà không cần enrollment transaction mới nếu rotation thành công.
-
-### 9.4 UX chung cho hai phương án
+### 9.3 UX chung cho hai phương án
 
 Console nên cung cấp một entry point duy nhất:
 
@@ -352,26 +273,125 @@ Add / Enroll Device
 
 Hai phương án phải tạo ra **cùng một enrollment transaction và cùng một trạng thái cuối**; khác nhau chỉ ở phương thức trao credential.
 
-Trạng thái enrollment đề xuất:
+Trạng thái đề xuất:
 
 ```text
+UNENROLLED
+   │
+   ▼
 PENDING
-  ↓
+   ↓
 VERIFIED
-  ↓
+   ↓
 BOUND
-  ↓
+   ↓
 ACTIVE
 
 PENDING → EXPIRED / REVOKED
 VERIFIED → REJECTED
 ```
 
-`ACTIVE` nghĩa là Device đã bind Tenant và có Device Identity/Credential runtime hợp lệ; không có nghĩa phải giữ một enrollment token sống lâu dài.
+### 9.4 Device Credential và vận hành lâu dài
 
-### 9.5 Enrollment ownership
+Sau khi `BOUND`, Device được cấp/bind một **Device Identity + long-lived runtime credential**. Credential này không phải enrollment token và không phải password của User.
 
-Enrollment phải xác định rõ Owner Tenant trước khi Device trở thành ACTIVE:
+```text
+Enrollment credential
+        │
+        └── one-time / short TTL
+                    │
+                    ▼
+              bind thành công
+                    │
+                    ▼
+        Device Identity / Credential
+              long-lived
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+     reconnect     session     command
+        │           │           │
+        └───────────┴───────────┘
+             KHÔNG re-enroll
+```
+
+Credential phải:
+- được lưu bằng secure storage/keystore của OS;
+- không log hoặc gửi cho User như password thông thường;
+- có trạng thái `ACTIVE/ROTATION_REQUIRED/REVOKED/RECOVERY_REQUIRED`;
+- hỗ trợ rotation mà không làm thay đổi `deviceId`;
+- hỗ trợ recovery/re-provision khi credential mất hoặc thiết bị bị factory reset.
+
+OS password/PIN nếu có chỉ phục vụ xác thực thao tác tại chính Device/OS; không dùng làm Device Credential của VRemote.
+
+### 9.5 Hủy enrollment / Factory Reset về trạng thái UNASSIGNED
+
+**Bắt buộc có cơ chế “Remove/Reset Enrollment” ngay trên Device/Agent** để xử lý tình huống Device đã được gán nhầm Tenant (ví dụ Tenant demo/test) nhưng sau đó cần gán cho Tenant thật. Với mô hình một Device chỉ có một Owner Tenant, nếu không có cơ chế này thì Device có thể bị khóa ownership vĩnh viễn trong Tenant cũ.
+
+Trên Device/Agent cần có thao tác tương đương:
+
+> **Reset VRemote Enrollment / Unassign Device**
+
+Đây là **factory reset của VRemote enrollment**, không nhất thiết là factory reset toàn bộ Android/OS.
+
+Luồng:
+
+```text
+Device đang ACTIVE
+Owner Tenant A
+      │
+      │ local authorized reset
+      ▼
+RESET_ENROLLMENT_PENDING
+      │
+      ▼
+REVOKE old Device Credential
+      │
+      ▼
+Xóa binding Tenant A + runtime credential
+      │
+      ▼
+UNASSIGNED / UNENROLLED
+      │
+      ├── hiển thị QR mới
+      └── hiển thị Device Code + Enrollment Token mới
+      │
+      ▼
+Enroll vào Tenant B
+```
+
+Nguyên tắc bảo mật của reset:
+- Reset phải được thực hiện **tại chính Device** và yêu cầu local authorization (ví dụ OS/device-admin credential hoặc thao tác vật lý được bảo vệ), hoặc một workflow remote có quyền quản trị đặc biệt nếu chính sách sản phẩm cho phép.
+- Không cho một User Tenant thông thường reset Device chỉ vì họ có `edge.admin.control`.
+- Phải revoke/invalidate credential cũ trước khi cho enrollment mới.
+- Enrollment token/codes cũ phải vô hiệu hóa.
+- `deviceId` vật lý/identity lịch sử phải được audit; không tạo nhầm hai Device record cho cùng một thiết bị.
+- Sau reset, Device không được tiếp tục nhận session/command của Tenant cũ.
+- Audit phải ghi `ENROLLMENT_RESET`, actor/method/reason, fromTenant và thời điểm; tuyệt đối không ghi secret.
+
+### 9.6 Khi nào dùng Transfer và khi nào dùng Reset
+
+**Transfer** là lựa chọn ưu tiên khi Tenant A và Tenant B có quy trình phối hợp và có thể xác nhận việc chuyển ownership:
+
+```text
+Tenant A → Transfer → Tenant B
+                 │
+                 └── giữ Device Identity
+                     không cần re-enroll
+```
+
+**Reset Enrollment** dùng khi:
+- Device đã enroll nhầm vào Tenant demo/test;
+- Tenant cũ không còn quản trị được hoặc không thể thực hiện transfer;
+- thiết bị được thu hồi/re-provision tại hiện trường;
+- factory reset OS làm mất credential;
+- cần đưa thiết bị về trạng thái sạch để enroll lại.
+
+Reset **không được xem là thao tác đăng nhập thường xuyên**. Mục tiêu là xử lý lifecycle/reassignment exception, trong khi Device ACTIVE bình thường phải được quản lý lâu dài mà không re-enroll.
+
+### 9.7 Enrollment ownership
+
+Enrollment phải xác định rõ Tenant trước khi Device trở thành ACTIVE:
 
 ```text
 Platform Identity
@@ -385,22 +405,15 @@ VRemote Enrollment
       ├── Device ID
       ├── Machine Code (nếu có)
       ├── Enrollment method
-      ├── Owner Tenant
-      └── Device Identity/Credential binding
+      └── Runtime credential binding
       │
       ▼
 VRemote Device Registry
 ```
 
-Một Device sau khi bind thuộc đúng **một Owner Tenant tại một thời điểm**; nhiều User/Principal có thể được cấp quyền truy cập theo Role/Scope/Access Grant. Việc chuyển Device sang Tenant khác là **Transfer/Re-assignment**; không mặc định re-enroll.
+Một Device sau khi bind có đúng một `ownerTenantId`; nhiều User trong Tenant có thể được cấp quyền truy cập theo Role/Scope. Delegated/support access được biểu diễn bằng Access Grant. Việc chuyển Device sang Tenant khác là Transfer hoặc Reset Enrollment/re-provision tùy trường hợp; **không yêu cầu re-enroll trong trường hợp Transfer thành công**.
 
-### 9.6 OS password và VRemote credential
-
-Nếu Device/OS yêu cầu password/PIN để mở khóa hoặc cho phép thao tác cục bộ, đây là **OS credential**, không phải enrollment credential và không phải VRemote Device Credential.
-
-VRemote không lưu hoặc log OS password/PIN. Có thể yêu cầu xác thực cục bộ trên box cho các thao tác nhạy cảm theo policy, nhưng việc Device reconnect/quản lý từ xa không được phụ thuộc vào việc operator nhập lại OS password.
-
-### 9.7 Enrollment và Platform Contract
+### 9.8 Enrollment và Platform Contract
 
 VRemote sử dụng `VREMOTE_PLATFORM_URL` để kết nối Platform. Platform cung cấp identity context và các primitive cần thiết để xác định Tenant/User/Permission/Scope. VRemote thực hiện enrollment domain và lưu trạng thái runtime/domain của Device.
 
@@ -440,9 +453,9 @@ Luật isolation: cấm phụ thuộc code hai chiều; chỉ OS supervisor/IPC 
 
 ## 13. Phân pha
 
-- **P1 Monitor:** signaling + STUN + TURN + WebRTC + backend session/token + console view + registry/provision + audit + **durable device identity/credential + enrollment QR/manual**.
+- **P1 Monitor:** signaling + STUN + TURN + WebRTC + backend session/token + console view + registry/provision + audit + enrollment QR/manual + persistent device identity + enrollment reset/unassign.
 - **P2 Control:** Accessibility PoC + quyền control + single-controller lock.
-- **P3 Fleet + Integration:** fleet-ops, supervisor/rollback, dashboard, Integration API, embeddable viewer.
+- **P3 Fleet + Integration:** fleet-ops, supervisor/rollback, dashboard, Integration API, embeddable viewer, delegated/support access.
 
 ## 14. Việc cần chốt trước khi code
 
@@ -450,11 +463,12 @@ Luật isolation: cấm phụ thuộc code hai chiều; chỉ OS supervisor/IPC 
 - D2: VPS signaling + TURN và ước lượng tải.
 - D3: Platform Contract cho SSO/identity/tenant/permission/scope.
 - D4: deviceId riêng + map machineCode.
-- D5: **Enrollment Contract/API + durable Device Identity/Credential + state machine cho QR/manual.**
-- D6: **Device Transfer/Re-assignment giữa Tenant, không mặc định re-enrollment.**
-- D7: **Device Access Grant / Delegated Support Access với TTL, revoke và audit.**
-- D8: Credential rotation/revocation/recovery và policy sau factory reset.
+- D5: Enrollment Contract/API và state machine cho QR + manual credential.
+- D6: Device transfer giữa Tenant, giữ Device Identity khi transfer.
+- D7: Device enrollment reset/unassign tại Device, revoke credential cũ và tạo enrollment credential mới.
+- D8: Long-lived Device Identity/Credential lifecycle: rotation, revocation, recovery/re-provision.
+- D9: Delegated/support access với TTL, scope và audit.
 
 ## Trạng thái
 
-**DRAFT** — bắt đầu từ contract-first + P1 Monitor. Enrollment hỗ trợ song song **QR Code** và **Device Code + Enrollment Token/Password**, sau đó cấp/bind **Device Identity + long-lived runtime credential** để thiết bị được quản lý lâu dài mà không phải enroll lại cho mỗi lần đăng nhập/session. Device thuộc **một Owner Tenant tại một thời điểm**; nhiều User/Principal có thể truy cập theo quyền; hỗ trợ liên Tenant dùng **Access Grant/Delegated Support**, còn chuyển ownership dùng **Transfer/Re-assignment**. Không phá contract lock-control của VBridge; tái dụng chuẩn ký/golden vector.
+**DRAFT** — bắt đầu từ contract-first + P1 Monitor. Enrollment hỗ trợ song song **QR Code** và **Device Code + Enrollment Token/Password**; sau enrollment Device được quản lý lâu dài bằng Device Identity/credential, không re-enroll cho mỗi lần sử dụng. Có cơ chế **Reset/Unassign Enrollment tại Device** để đưa thiết bị về `UNASSIGNED/UNENROLLED` khi cần gán lại Tenant, đồng thời có **Transfer** cho trường hợp chuyển ownership có kiểm soát. Không phá contract lock-control của VBridge; tái dụng chuẩn ký/golden vector.
