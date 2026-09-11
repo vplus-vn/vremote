@@ -5,7 +5,8 @@
 - **Trạng thái:** DRAFT để hiện thực.
 - **Nguồn giao việc:** `vplus-vn/vremote#7` — *HANDOFF: VRemote Platform Standardization v0.2.0*.
 - **Baseline vào:** `vremote_v0.1.0` — `vplus-vn/vremote@438cdd9` (tham chiếu bất biến tại `vplus-vn/VSpace/baseline/vremote/`).
-- **Baseline ra (khi DONE):** `vremote_v0.2.0_platform-standardized`.
+- **Increment hiện tại:** `vremote_v0.1.2` — bước chuẩn hóa đầu tiên (domain/platform/authz/enrollment/transfer) hướng tới target dưới đây.
+- **Baseline ra (target cuối):** `vremote_v0.2.0_platform-standardized`.
 - **Đọc kèm:** `DSG-VREMOTE-001` (kiến trúc domain đích — *CÁI GÌ*), `REQ-VREMOTE-001` (yêu cầu), `api/vremote/*` (contract khóa v0.0.1).
 
 ## 0. Quan hệ với DSG-VREMOTE-001

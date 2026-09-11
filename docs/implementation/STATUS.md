@@ -3,7 +3,7 @@
 > Đây là tài liệu **trạng thái canonical duy nhất**. Hai file `P1-STATUS.md` và `P1-implementation-status.md` là **snapshot lịch sử của giai đoạn P1** (viết ở hai thời điểm khác nhau nên mâu thuẫn nhau) và đã được đánh dấu *superseded*; đừng dùng chúng làm nguồn sự thật.
 
 - **Baseline hiện tại:** `vremote_v0.1.0` — `vplus-vn/vremote@438cdd9` (đóng băng tại `vplus-vn/VSpace/baseline/vremote/`).
-- **Giai đoạn đang làm:** Platform Standardization `v0.2.0` — xem `docs/design/DSG-VREMOTE-002-platform-standardization.md`, giao việc tại `vplus-vn/vremote#7`.
+- **Giai đoạn đang làm:** increment **`v0.1.2`** — bước chuẩn hóa đầu tiên hướng tới kiến trúc `v0.2.0` platform-standardized (`docs/design/DSG-VREMOTE-002-platform-standardization.md`), giao việc tại `vplus-vn/vremote#7`. Baseline ra: `vremote_v0.1.2`.
 
 ## 1. Thực trạng baseline v0.1.0 (đã kiểm chứng từ code)
 
