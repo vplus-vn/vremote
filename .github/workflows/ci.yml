@@ -9,14 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: test -f api/vremote/openapi.yaml && test -f api/vremote/asyncapi.yaml && test -f api/vremote/signing.md
+      - run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
-        with: { php-version: '8.3' }
+        with:
+          php-version: '8.3'
+          extensions: mongodb
       - run: composer install --no-interaction --prefer-dist
       - run: php artisan test
   console:
