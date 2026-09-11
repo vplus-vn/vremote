@@ -5,6 +5,12 @@
 > Vừa là bài học nội bộ cho service VRemote, vừa là bản góp ý để chuyển lên `vplus-platform/core-lib`.
 >
 > Ngày: 2026-09-12 · Bối cảnh: đưa VRemote lên production `vremote.vplus.vn`, auth dùng chung platform như fleet `cab.sab.com.vn`.
+>
+> **Đã được platform tiếp nhận:** feedback này đã trở thành backlog **DX-1** của core-lib
+> (`vplus-platform/control → projects/vplus-platform/core-lib-consumer-dx.md`), khớp finding **S8**
+> trong audit (ADR-0008). VRemote được ghi nhận là **consumer thật đầu tiên** của core-lib → đủ DoD
+> để platform **tag `0.1.0`**. Tài liệu này là **case study nguồn** của DX-1, không phải nguồn sự thật
+> song song — mọi quyết định DX thuộc về DX-1.
 
 ---
 
@@ -87,3 +93,17 @@ Ghi lại để dev VRemote sau này khỏi phải mò lại:
 - **Bẫy thường gặp**: `config('core.*')` rỗng ⇒ manifest chưa gồm core-lib ⇒ chạy
   `php artisan package:discover` + `optimize:clear`. `401 UNAUTHENTICATED` với token hợp lệ ⇒ kiểm key file,
   không phải token.
+
+## 4. Việc cần làm tiếp cho VRemote (theo DX-1)
+
+Rút từ bảng env chuẩn hoá của DX-1 (`core-lib-consumer-dx.md`):
+
+- **`.env` VRemote nên set khớp default platform**:
+  `CORE_JWT_ISSUER=platform-service` (default DX-1) và `CORE_JWT_AUDIENCE` theo service; key path
+  mặc định `storage/keys/services/platform/platform_public_key.pem` (đã đặt) — không cần override nếu
+  đặt đúng chỗ.
+- **Pin phiên bản khi core-lib có tag**: hiện `composer.json` dùng `vplus-platform/core-lib: dev-main`
+  (moving target). Khi platform tag **`0.1.0`** (mà VRemote chính là consumer kích hoạt), đổi sang
+  `^0.1.0` để ổn định + biết khi contract auth đổi.
+- **Deploy**: thêm `optimize:clear` + `package:discover` (+ `core:doctor` khi DX-1 ra) vào cuối quy
+  trình deploy — chính là bẫy đã làm auth "chết câm" ở lần deploy này (DX-1 mục 5).
