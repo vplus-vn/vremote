@@ -12,8 +12,8 @@ info:
       - Sản phẩm khác **KHÔNG** nói trực tiếp với box — chỉ qua API này (một cửa + audit).
       - `accepted` (202) ở /commands nghĩa là ĐÃ nhận + ký + chuyển box; kết quả cuối trả sau/hoặc qua audit.
 servers:
-  - url: https://vremote.example/api/v1
-    description: VRemote Backend (thay host theo deploy)
+  - url: https://vremote.example/api/vremote/v1
+    description: VRemote Backend — chuẩn vplus-platform /api/{service}/v1 (thay host theo deploy)
 security:
   - vplusBearer: []
 paths:

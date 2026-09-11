@@ -97,7 +97,7 @@ App secrets (session/signaling/TURN secrets, DB password, VPlus keys) live **onl
 
 1. Merge to `main`.
 2. Actions → **Deploy Production** → *Run workflow* → branch `main` → `confirm = deploy`.
-3. The workflow builds backend/console/signaling, uploads a new release, links shared state, runs `migrate --force`, flips `current`, restarts signaling, reloads php-fpm + nginx, and checks `GET /api/health` returns `200`.
+3. The workflow builds backend/console/signaling, uploads a new release, links shared state, runs `migrate --force`, flips `current`, restarts signaling, reloads php-fpm + nginx, and checks `GET /api/vremote/health` returns `200`.
 
 Rollback: point `current` at the previous release and reload:
 ```bash

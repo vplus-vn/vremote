@@ -58,7 +58,7 @@ tenant của thiết bị** (hoặc có access-grant) mới thao tác được �
 Mở `https://vremote.vplus.vn/` và đăng nhập.
 
 1. **Danh sách thiết bị** — hiển thị các box: mã máy, tên, trạng thái (`online`/`offline`), phiên bản agent.
-2. **Mở phiên xem (view)** — chọn thiết bị `online` → *Xem màn hình*. Console gọi `POST /api/v1/sessions`
+2. **Mở phiên xem (view)** — chọn thiết bị `online` → *Xem màn hình*. Console gọi `POST /api/vremote/v1/sessions`
    với `capability=view`, nhận `sessionToken` + `signalingUrl` + `iceServers`, rồi thiết lập WebRTC
    để nhận luồng hình ảnh trực tiếp từ box.
 3. **Điều khiển (control)** — cần quyền `edge.admin.control`. Mở phiên `capability=control` để gửi
@@ -71,25 +71,25 @@ Mở `https://vremote.vplus.vn/` và đăng nhập.
 
 ## 4. REST API
 
-Base URL: `https://vremote.vplus.vn/api`. Mọi endpoint `v1` yêu cầu header
+Base URL: `https://vremote.vplus.vn` — mọi path dưới `/api/vremote/`. Endpoint `v1` yêu cầu header
 `Authorization: Bearer <token>`. Lỗi trả về dạng `{"error":{"code":"...","message":"..."}}`.
 
 ### 4.0 Health (không cần auth)
 ```http
-GET /api/health
+GET /api/vremote/health
 → 200 {"status":"ok","service":"vremote-backend"}
 ```
 
 ### 4.1 Thiết bị
 ```http
-GET /api/v1/devices                 # danh sách thiết bị
-GET /api/v1/devices/{deviceId}      # chi tiết một thiết bị
+GET /api/vremote/v1/devices                 # danh sách thiết bị
+GET /api/vremote/v1/devices/{deviceId}      # chi tiết một thiết bị
 ```
 Yêu cầu quyền `edge.admin.view`.
 
 ### 4.2 Phiên (view/control)
 ```http
-POST /api/v1/sessions
+POST /api/vremote/v1/sessions
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -112,12 +112,12 @@ Content-Type: application/json
 
 Đóng phiên:
 ```http
-DELETE /api/v1/sessions/{sessionId}      → 204
+DELETE /api/vremote/v1/sessions/{sessionId}      → 204
 ```
 
 ### 4.3 Lệnh quản trị
 ```http
-POST /api/v1/devices/{deviceId}/commands
+POST /api/vremote/v1/devices/{deviceId}/commands
 { "type": "health", "args": {}, "commandId": "CMD-optional", "confirm": false }
 ```
 Phản hồi `202`: `{"commandId":"CMD-...","accepted":true,"result":"accepted"}`.
@@ -136,12 +136,12 @@ Lệnh GATED khi tắt chính sách trả `403 GATED_OFF`. Mọi lệnh backend 
 
 ### 4.5 Audit
 ```http
-GET /api/v1/audit        # nhật ký mở/đóng phiên, lệnh đã gửi
+GET /api/vremote/v1/audit        # nhật ký mở/đóng phiên, lệnh đã gửi
 ```
 
 ### 4.6 Tích hợp (sản phẩm khác)
 ```http
-POST /api/v1/integrations/sessions
+POST /api/vremote/v1/integrations/sessions
 ```
 Sản phẩm tích hợp **chỉ** gọi endpoint này để nhận token phạm vi hẹp + TTL cho một phiên xem;
 **không** nói trực tiếp với box và **không** ký lệnh.
@@ -156,18 +156,18 @@ Các endpoint chuẩn hóa v0.1.2 (DSG-VREMOTE-002 §7), nằm ngoài hợp đ�
 ### 5.1 Đăng ký (enrollment)
 Trạng thái: `UNENROLLED → PENDING → VERIFIED → BOUND → ACTIVE`.
 ```http
-POST /api/v1/devices/{deviceId}/enrollments      # tạo yêu cầu đăng ký (sinh mã/enrollmentId)
-POST /api/v1/enrollments/{enrollmentId}/consume  # box dùng mã để hoàn tất đăng ký
-POST /api/v1/devices/{deviceId}/enrollment/reset  # reset về trạng thái đăng ký ban đầu
+POST /api/vremote/v1/devices/{deviceId}/enrollments      # tạo yêu cầu đăng ký (sinh mã/enrollmentId)
+POST /api/vremote/v1/enrollments/{enrollmentId}/consume  # box dùng mã để hoàn tất đăng ký
+POST /api/vremote/v1/devices/{deviceId}/enrollment/reset  # reset về trạng thái đăng ký ban đầu
 ```
 
 ### 5.2 Chuyển giao (transfer)
 Chuyển thiết bị giữa các tenant/chủ sở hữu, có duyệt:
 ```http
-POST /api/v1/devices/{deviceId}/transfers   # mở yêu cầu chuyển
-POST /api/v1/transfers/{transferId}/approve # bên nhận/duyệt chấp thuận
-POST /api/v1/transfers/{transferId}/reject  # từ chối
-POST /api/v1/transfers/{transferId}/complete# hoàn tất chuyển
+POST /api/vremote/v1/devices/{deviceId}/transfers   # mở yêu cầu chuyển
+POST /api/vremote/v1/transfers/{transferId}/approve # bên nhận/duyệt chấp thuận
+POST /api/vremote/v1/transfers/{transferId}/reject  # từ chối
+POST /api/vremote/v1/transfers/{transferId}/complete# hoàn tất chuyển
 ```
 
 ---
@@ -184,12 +184,12 @@ POST /api/v1/transfers/{transferId}/complete# hoàn tất chuyển
 ## 7. Luồng điển hình: xem màn hình một box
 
 1. Admin đăng nhập console (SSO platform) → có Bearer token.
-2. Chọn box `online` → console `POST /api/v1/sessions {capability:"view"}`.
+2. Chọn box `online` → console `POST /api/vremote/v1/sessions {capability:"view"}`.
 3. Backend kiểm quyền `edge.admin.view` (+ tenant nếu bật), ký `session.enable`, gửi qua signaling
    `/agent` tới box, trả `sessionToken` + `signalingUrl` + `iceServers`.
 4. Console mở WSS `/signaling`, xác thực bằng `sessionToken`, đàm phán SDP/ICE.
 5. WebRTC thiết lập → **hình ảnh màn hình chảy trực tiếp** từ box về console.
-6. Đóng: console `DELETE /api/v1/sessions/{id}` → backend gửi `session.disable` → box dừng chia sẻ.
+6. Đóng: console `DELETE /api/vremote/v1/sessions/{id}` → backend gửi `session.disable` → box dừng chia sẻ.
 
 ---
 

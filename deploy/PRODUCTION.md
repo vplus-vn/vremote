@@ -40,7 +40,7 @@ Set `VREMOTE_DEV_AUTH=false`.
 
 Build/install the Laravel backend with production dependencies, configure the deployed Vplus SSO issuer/algorithm/public-key or JWKS integration, and run the application behind the Nginx `/api/` proxy.
 
-Health endpoint: `GET /api/health`.
+Health endpoint: `GET /api/vremote/health`.
 
 ## Signaling
 

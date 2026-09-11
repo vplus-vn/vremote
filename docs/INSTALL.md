@@ -311,7 +311,7 @@ ln -sfn "$PWD/releases/r1" current
 sudo systemctl reload php8.3-fpm nginx
 
 # Smoke test
-curl -fsS https://vremote.vplus.vn/api/health          # {"status":"ok","service":"vremote-backend"}
+curl -fsS https://vremote.vplus.vn/api/vremote/health          # {"status":"ok","service":"vremote-backend"}
 curl -fsS -o /dev/null -w '%{http_code}\n' https://vremote.vplus.vn/   # 200 (console)
 ```
 - Đặt APK đã ký tại `shared/downloads/vremote-agent.apk` (agent tải qua `/downloads/`).
@@ -339,7 +339,7 @@ sudo systemctl restart vremote-signaling && sudo systemctl reload php8.3-fpm ngi
 | `lock file does not contain a compatible set of packages` | Lock resolve trên PHP 8.4 | `rm composer.lock && composer update` trên PHP 8.3 — §3.2 |
 | `symfony/... requires php >=8.4.1` | Như trên | Như trên (resolve lại trên 8.3) |
 | 500 sau deploy, log `permission denied` `storage/` | php-fpm không ghi được storage | Quyền php-fpm — §5 |
-| `/api/health` 502 | php-fpm/pool sai socket | Đối chiếu `fastcgi_pass` với pool — §5/§8 |
+| `/api/vremote/health` 502 | php-fpm/pool sai socket | Đối chiếu `fastcgi_pass` với pool — §5/§8 |
 | Console mở nhưng gọi API lỗi CORS | Console không cùng-origin | Production phục vụ console ở gốc domain, gọi `/api` cùng-origin — không set VITE proxy |
 
 ---
