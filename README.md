@@ -55,7 +55,7 @@ Build `agent-android` with Android Studio/Gradle and install the APK. The first-
 
 Press **Enable VRemote Agent** and approve Android MediaProjection once. Screen capture remains OFF until the backend sends a valid signed `session.enable`; the agent verifies timestamp, nonce and HMAC before starting capture.
 
-CI also publishes the debug APK as the `vremote-agent-debug-apk` workflow artifact. Production use requires a separately signed release APK.
+Build the debug APK locally with Gradle (`gradle :app:assembleDebug`). Production use requires a separately signed release APK.
 
 ## Production deployment
 
