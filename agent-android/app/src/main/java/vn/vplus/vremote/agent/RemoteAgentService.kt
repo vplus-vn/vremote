@@ -1,20 +1,31 @@
 package vn.vplus.vremote.agent
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
-import android.content.Intent
-import android.os.IBinder
+import android.app.*
+import android.content.*
+import android.media.projection.MediaProjection
+import android.os.*
+import org.webrtc.*
+import okhttp3.*
+import org.json.JSONObject
 
 class RemoteAgentService : Service() {
-    override fun onCreate() {
-        super.onCreate()
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "VRemote", NotificationManager.IMPORTANCE_LOW))
-        startForeground(1, Notification.Builder(this, CHANNEL).setContentTitle("VRemote Agent").setContentText("Screen sharing disabled until authorized session").setSmallIcon(android.R.drawable.ic_menu_view).build())
-    }
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
-    override fun onBind(intent: Intent?): IBinder? = null
-    companion object { private const val CHANNEL = "vremote-agent" }
+    private lateinit var socket:WebSocket; private lateinit var factory:PeerConnectionFactory; private lateinit var egl:EglBase; private var peer:PeerConnection?=null; private var capturer:ScreenCapturerAndroid?=null; private var source:VideoSource?=null; private var projection:MediaProjection?=null; private var activeSession:String?=null
+    override fun onCreate(){super.onCreate();getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startForeground(1,Notification.Builder(this,CHANNEL).setContentTitle("VRemote Agent").setContentText("Waiting for signed remote session").setSmallIcon(android.R.drawable.ic_menu_view).build());PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();factory=PeerConnectionFactory.builder().setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext,true,true)).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory();connect()}
+    private fun connect(){val p=getSharedPreferences("vremote",MODE_PRIVATE);val id=p.getString("deviceId","")?:""";val token=p.getString("deviceToken","")?:""";val url=p.getString("signalingUrl","ws://10.0.2.2:8787/agent")?:""";val req=Request.Builder().url(url).build();socket=OkHttpClient().newWebSocket(req,object:WebSocketListener(){override fun onOpen(w:WebSocket,r:Response){w.send(JSONObject().put("type","agent.auth").put("deviceId",id).put("deviceToken",token).toString());w.send(JSONObject().put("type","agent.hello").put("deviceId",id).put("agentVersion","0.2.0").put("platform","android").put("capabilities",listOf("screen.view","screen.control")).toString())};override fun onMessage(w:WebSocket,text:String){handle(JSONObject(text))};override fun onFailure(w:WebSocket,t:Throwable,r:Response?){Handler(Looper.getMainLooper()).postDelayed({connect()},5000)}})}
+    private fun handle(m:JSONObject){when(m.optString("type")){"session.enable"->enable(m);"offer"->handleOffer(m);"candidate"->handleCandidate(m);"session.disable"->disable(m)}}
+    private fun enable(m:JSONObject){activeSession=m.optString("sessionId");if(activeSession.isNullOrBlank())return;startCapture();sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",activeSession).put("payload",JSONObject().put("type","ready").put("sessionId",activeSession)))}
+    private fun startCapture(){if(peer!=null)return;val servers=ArrayList<PeerConnection.IceServer>();peer=factory.createPeerConnection(servers,observer())
+        val result=ServiceCompatExtras.resultCode(intentCache);val data=ServiceCompatExtras.data(intentCache);if(result==null||data==null)return;projection=getSystemService(MediaProjectionManager::class.java).getMediaProjection(result,data);capturer=ScreenCapturerAndroid(data,object:MediaProjection.Callback(){override fun onStop(){capturer?.stopCapture()}});source=factory.createVideoSource(true);val helper=SurfaceTextureHelper.create("VRemoteCapture",egl.eglBaseContext);capturer!!.initialize(helper,this,source!!.capturerObserver);capturer!!.startCapture(1280,720,15);peer!!.addTrack(factory.createVideoTrack("screen",source),listOf("screen"))}
+    private var intentCache:Intent?=null
+    override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int{if(intent!=null)intentCache=intent;return START_STICKY}
+    private fun observer()=object:PeerConnection.Observer{override fun onIceCandidate(c:IceCandidate){sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",activeSession).put("payload",JSONObject().put("type","candidate").put("sessionId",activeSession).put("candidate",JSONObject().put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex).put("candidate",c.sdp))) };override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){ } override fun onSignalingChange(s:PeerConnection.SignalingState){} override fun onIceConnectionReceivingChange(b:Boolean){} override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){} override fun onIceCandidatesRemoved(c:Array<IceCandidate>){} override fun onAddStream(s:MediaStream){} override fun onRemoveStream(s:MediaStream){} override fun onDataChannel(d:DataChannel){} override fun onRenegotiationNeeded(){} override fun onConnectionChange(s:PeerConnection.PeerConnectionState){} override fun onSelectedCandidatePairChanged(e:CandidatePairChangeEvent){} override fun onTrack(t:RtpTransceiver){}}
+    private fun handleOffer(m:JSONObject){val sdp=m.optString("sdp");if(sdp.isBlank()||peer==null)return;peer!!.setRemoteDescription(object:SimpleSdpObserver(){override fun onSetSuccess(){peer!!.createAnswer(object:SimpleSdpObserver(){override fun onCreateSuccess(d:SessionDescription){peer!!.setLocalDescription(SimpleSdpObserver(),d);sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",activeSession).put("payload",JSONObject().put("type","answer").put("sessionId",activeSession).put("sdp",d.description)))}} ,MediaConstraints())}},SessionDescription(SessionDescription.Type.OFFER,sdp))}
+    private fun handleCandidate(m:JSONObject){val c=m.optJSONObject("candidate")?:return;peer?.addIceCandidate(IceCandidate(c.optString("sdpMid"),c.optInt("sdpMLineIndex"),c.optString("candidate")))}
+    private fun sendSignal(payload:JSONObject){socket.send(payload.toString())}
+    private fun disable(m:JSONObject){if(m.optString("sessionId")!=activeSession)return;capturer?.stopCapture();peer?.close();peer=null;activeSession=null}
+    override fun onBind(i:Intent?):IBinder?=null
+    override fun onDestroy(){try{socket.close(1000,"shutdown")}catch(_:Throwable){};peer?.close();capturer?.dispose();source?.dispose();factory.dispose();egl.release();super.onDestroy()}
+    companion object{const val EXTRA_RESULT_CODE="resultCode";const val EXTRA_DATA="projectionData";private const val CHANNEL="vremote-agent"}
 }
+private open class SimpleSdpObserver: SdpObserver{override fun onCreateSuccess(s:SessionDescription){};override fun onSetSuccess(){};override fun onCreateFailure(s:String){};override fun onSetFailure(s:String){}}
+private object ServiceCompatExtras{fun resultCode(i:Intent?)=i?.getIntExtra(RemoteAgentService.EXTRA_RESULT_CODE,-1)?.takeIf{it>0};fun data(i:Intent?)=if(Build.VERSION.SDK_INT>=33)i?.getParcelableExtra(RemoteAgentService.EXTRA_DATA,Intent::class.java)else @Suppress("DEPRECATION") i?.getParcelableExtra(RemoteAgentService.EXTRA_DATA)}
