@@ -14,33 +14,41 @@
 - Safe fleet commands: health/version/ping/logs/config-read; GATED operations remain disabled by default.
 - Command signing and commandId idempotency boundary.
 - Docker Compose runnable stack: backend, console, signaling and TURN.
-- CI covers contract, backend, console, signaling and Android build/test.
+- Backend and signaling health endpoints.
+- Production ingress template for `vremote.vplus.vn` with HTTPS and WSS routing.
+- Console entry for downloading the approved Android Agent APK.
+- CI publishes the Android debug APK as a workflow artifact.
 
 ## Security gates
 
 - No inbound listener is added to the Android agent; it initiates the WebSocket connection.
 - Screen capture is OFF until a valid backend-signed `session.enable` is accepted.
-- Backend is the only signer for box commands.
+- Backend is the only signer for session/command messages.
 - `edge.admin.view` and `edge.admin.control` remain separate.
 - GATED operations require explicit policy + confirmation and remain off by default.
 - Device secrets are not returned by the device API.
 
-## Local run path
+## Production deployment
 
-1. Copy `backend/.env.example` to `backend/.env` and set unique secrets.
-2. Configure the demo device token consistently in backend and Android Agent.
-3. Run `docker compose up --build`.
-4. Open the console at `http://localhost:5173`.
-5. Install the Android debug APK, configure the device/signaling/TURN settings, grant MediaProjection permission, and leave the agent running.
-6. The device should become available for `View`; opening a session establishes WebRTC and displays the screen.
+Target public URL: `https://vremote.vplus.vn`.
 
-## Production hardening still required
+1. Point DNS to the VRemote ingress host.
+2. Provision a trusted TLS certificate.
+3. Deploy Nginx using `deploy/nginx/vremote.vplus.vn.conf`.
+4. Run backend, console and signaling on private loopback ports.
+5. Deploy production coturn and keep the shared TURN secret consistent across backend, coturn and agents.
+6. Set `VREMOTE_DEV_AUTH=false` and configure the deployed Vplus SSO/JWKS boundary.
+7. Deploy a signed Android release APK to `/srv/vremote/downloads/vremote-agent.apk` or set `VITE_AGENT_DOWNLOAD_URL` to its approved location.
+8. Enroll/configure an Android box and verify the end-to-end WebRTC smoke test in `deploy/PRODUCTION.md`.
+
+## Remaining product/platform work
 
 - Replace the development JSON registry with the shared vplus-platform registry/storage capability.
 - Complete exact deployed Vplus SSO issuer/claim mapping and production key rotation.
 - Move audit/session/command storage to durable shared platform storage and persist agent command results.
-- Deploy WSS/HTTPS behind Vplus ingress and managed secrets.
+- Production TURN hardening (TLS/DTLS, relay range, firewall and monitoring).
+- QR/device enrollment and automated credential rotation.
 - Complete P2 input injection only after the required Android R1 PoC is approved.
-- Add production fleet scale, device provisioning/rotation and P3 integration UX.
+- Add production fleet scale and P3 integration UX.
 
-These are deployment/product hardening items. They do not require changing the locked VRemote contract unless a new capability cannot be represented by v0.0.1.
+These are production platform/product items. The locked VRemote contract remains unchanged.

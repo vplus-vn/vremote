@@ -12,7 +12,8 @@ function verifyViewer(token:string){if(!sessionSecret)return null;const [body,si
 function verifyAgent(deviceId:string,token:string){const expected=devices[deviceId]?.deviceToken??'';return !!expected&&token.length===expected.length&&timingSafeEqual(Buffer.from(token),Buffer.from(expected))}
 function send(c:Client,v:unknown){if(c.socket.readyState===WebSocket.OPEN)c.socket.send(JSON.stringify(v))}
 function cleanup(c:Client){if(c.deviceId&&agents.get(c.deviceId)===c)agents.delete(c.deviceId);if(c.sessionId){const s=sessions.get(c.sessionId);s?.delete(c);if(!s?.size)sessions.delete(c.sessionId)}}
-const server=createServer();const wss=new WebSocketServer({noServer:true});
+const server=createServer((req,res)=>{if(req.method==='GET'&&req.url==='/health'){res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',service:'vremote-signaling'}));return}res.statusCode=404;res.end()});
+const wss=new WebSocketServer({noServer:true});
 server.on('upgrade',(req,socket,head)=>{if(req.url!=='/signaling'&&req.url!=='/agent'){socket.destroy();return}wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req))});
 wss.on('connection',(socket,req)=>{const path=new URL(req.url??'/',`http://${req.headers.host??'localhost'}`).pathname;const role=path==='/agent'?'agent':'viewer';const c:Client={socket,role,clientId:randomUUID()};
  socket.on('message',raw=>{let m:any;try{m=JSON.parse(raw.toString())}catch{socket.close(1007,'invalid_json');return}
@@ -20,7 +21,7 @@ wss.on('connection',(socket,req)=>{const path=new URL(req.url??'/',`http://${req
    if(!c.deviceId){if(m.type!=='agent.auth'||typeof m.deviceId!=='string'||typeof m.deviceToken!=='string'||!verifyAgent(m.deviceId,m.deviceToken)){socket.close(1008,'unauthorized');return}if(agents.has(m.deviceId))agents.get(m.deviceId)?.socket.close(4001,'replaced');c.deviceId=m.deviceId;agents.set(m.deviceId,c);send(c,{type:'agent.authenticated'});return}
    if(m.type==='agent.hello'){send(c,{type:'agent.hello.ack',deviceId:c.deviceId});return}
    if(m.type==='agent.signaling'&&typeof m.sessionId==='string'&&m.sessionId.length<=128){const s=sessions.get(m.sessionId);if(!s)return;for(const peer of s)if(peer.role==='viewer')send(peer,m.payload);return}
-   if(m.type==='telemetry'){return}return;
+   if(m.type==='telemetry')return;return;
   }
   if(!c.sessionId){if(m.type!=='join'||typeof m.sessionToken!=='string'){socket.close(1008,'join_required');return}const p=verifyViewer(m.sessionToken);if(!p?.sid||!p?.did||!p?.cap){send(c,{type:'error',code:'unauthorized'});socket.close(1008,'unauthorized');return}c.sessionId=p.sid;c.deviceId=p.did;let s=sessions.get(p.sid);if(!s){s=new Set();sessions.set(p.sid,s)}s.add(c);send(c,{type:'joined',sessionId:p.sid,clientId:c.clientId,capability:p.cap});return}
   if(m.sessionId!==c.sessionId||!['offer','answer','candidate','leave'].includes(m.type))return;const agent=c.deviceId?agents.get(c.deviceId):undefined;if(agent)send(agent,{type:'agent.signaling',sessionId:c.sessionId,payload:m});if(m.type==='leave')cleanup(c);
