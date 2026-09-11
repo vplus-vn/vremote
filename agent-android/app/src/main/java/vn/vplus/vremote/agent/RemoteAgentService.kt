@@ -2,7 +2,6 @@ package vn.vplus.vremote.agent
 
 import android.app.*
 import android.content.*
-import android.media.projection.MediaProjectionManager
 import android.os.*
 import okhttp3.*
 import org.json.JSONObject
@@ -24,9 +23,8 @@ class RemoteAgentService : Service() {
         factory=PeerConnectionFactory.builder().setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext,true,true)).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int { if(intent!=null)intentCache=intent; if(!::socket.isInitialized)connect(); return START_STICKY }
-
     private fun connect(){
-        val p=getSharedPreferences("vremote",MODE_PRIVATE); val id=p.getString("deviceId","")?""; val token=p.getString("deviceToken","")?""; val url=p.getString("signalingUrl","ws://10.0.2.2:8787/agent")?""
+        val p=getSharedPreferences("vremote",MODE_PRIVATE); val id=p.getString("deviceId","") ?: ""; val token=p.getString("deviceToken","") ?: ""; val url=p.getString("signalingUrl","ws://10.0.2.2:8787/agent") ?: ""
         socket=OkHttpClient().newWebSocket(Request.Builder().url(url).build(),object:WebSocketListener(){
             override fun onOpen(w:WebSocket,r:Response){w.send(JSONObject().put("type","agent.auth").put("deviceId",id).put("deviceToken",token).toString());w.send(JSONObject().put("type","agent.hello").put("deviceId",id).put("agentVersion","0.2.0").put("platform","android").toString())}
             override fun onMessage(w:WebSocket,text:String){try{handle(JSONObject(text))}catch(_:Throwable){}}
@@ -35,10 +33,10 @@ class RemoteAgentService : Service() {
     }
     private fun handle(m:JSONObject){when(m.optString("type")){"session.enable"->enable(m);"offer"->handleOffer(m);"candidate"->handleCandidate(m);"session.disable"->disable(m)}}
     private fun enable(m:JSONObject){
-        val id=getSharedPreferences("vremote",MODE_PRIVATE).getString("deviceId","")?""; val secret=getSharedPreferences("vremote",MODE_PRIVATE).getString("deviceToken","")?""
+        val prefs=getSharedPreferences("vremote",MODE_PRIVATE); val id=prefs.getString("deviceId","") ?: ""; val secret=prefs.getString("deviceToken","") ?: ""
         val sid=m.optString("sessionId"); val nonce=m.optString("nonce"); val ts=m.optLong("ts",0); val ttl=m.optInt("ttlSec",0); val cap=m.optString("capability"); val sig=m.optString("sig")
         if(m.optString("deviceId")!=id||sid.isBlank()||nonce.isBlank()||sig.isBlank()||ttl<=0||kotlin.math.abs(System.currentTimeMillis()/1000-ts)>300||!seenNonces.add(nonce))return
-        val signer=VRemoteSigner(); val canonical=signer.canonicalSessionEnable(id,sid,cap,ttl,nonce,ts); if(!signer.verify(secret,canonical,sig))return
+        val signer=VRemoteSigner(); if(!signer.verify(secret,signer.canonicalSessionEnable(id,sid,cap,ttl,nonce,ts),sig))return
         activeSession=sid; startCapture(); sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",sid).put("payload",JSONObject().put("type","ready").put("sessionId",sid)))
     }
     private fun startCapture(){
