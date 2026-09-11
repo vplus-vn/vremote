@@ -6,6 +6,14 @@ VRemote is the Vplus remote screen monitoring/control product for Android edge b
 
 VRemote is built on the shared **vplus-platform** baseline. P1 is Monitor-first: registry, session/token, signaling, STUN/TURN, browser WebRTC receive, and Android screen capture. P2 adds input/control; P3 adds fleet/integrations.
 
+## Status & standardization
+
+- **Baseline:** `vremote_v0.1.0` (`@438cdd9`), frozen at `vplus-vn/VSpace/baseline/vremote/`.
+- **In progress:** Platform Standardization **v0.2.0** — see [`docs/design/DSG-VREMOTE-002-platform-standardization.md`](docs/design/DSG-VREMOTE-002-platform-standardization.md) and handoff `vplus-vn/vremote#7`.
+- **Canonical status:** [`docs/implementation/STATUS.md`](docs/implementation/STATUS.md).
+
+The "Production user flow" below is the **target** flow. In baseline v0.1.0 several steps are prototype-level (SSO not yet wired into the Console, JSON persistence, no tenant isolation); v0.2.0 replaces these with a Platform adapter (`VREMOTE_PLATFORM_URL`), DB-backed repositories, and full authorization. See `STATUS.md` for exactly what exists today.
+
 ## Contract-first
 
 `api/vremote` version `0.0.1` is the source of truth. Do not change it unilaterally.
@@ -29,7 +37,7 @@ Target public URL: `https://vremote.vplus.vn`.
 7. Backend authorizes the session, creates a scoped TTL token, signs `session.enable`, and sends it to signaling.
 8. Android verifies the signature and starts screen capture.
 9. Browser and Android establish WebRTC; video does not pass through the backend.
-10. Closing the session or TTL expiry stops capture.
+10. TTL expiry stops capture. (Baseline v0.1.0: closing the session in the Console removes the server record but does **not yet** push `session.disable` to the agent — explicit stop-on-close and session-token revocation are a v0.2.0 item, see `docs/design/DSG-VREMOTE-002-platform-standardization.md` §6.)
 
 The Console download URL is controlled by `VITE_AGENT_DOWNLOAD_URL` and defaults to `/downloads/vremote-agent.apk`. The signed APK is deployed outside the Git source tree (see `deploy/PRODUCTION.md`).
 
