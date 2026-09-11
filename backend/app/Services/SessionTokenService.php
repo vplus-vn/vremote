@@ -29,5 +29,5 @@ final class SessionTokenService
     }
 
     private function b64(string $value): string { return rtrim(strtr(base64_encode($value), '+/', '-_'), '='); }
-    private function unb64(string $value): string { return base64_decode(strtr($value, '-_', '+/').'='.str_repeat('=', (4-strlen($value)%4)%4), true) ?: ''; }
+    private function unb64(string $value): string { return base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4-strlen($value)%4)%4), true) ?: ''; }
 }
