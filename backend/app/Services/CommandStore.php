@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Domain\Contracts\CommandRepository;
 use Illuminate\Support\Facades\File;
 
-final class CommandStore
+final class CommandStore implements CommandRepository
 {
     private string $path;
     public function __construct(){ $this->path=storage_path('app/vremote-commands.json'); }

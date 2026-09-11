@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Domain\Contracts\SessionRepository;
 use Illuminate\Support\Facades\File;
 
-final class SessionStore
+final class SessionStore implements SessionRepository
 {
     private string $path;
     public function __construct() { $this->path = storage_path('app/vremote-sessions.json'); }

@@ -13,7 +13,18 @@ final class SessionController {
   $ice=config('vremote.ice_servers',[]);$t=$turn->forSession($data['deviceId'],$ttl);if($t)$ice[]=$t;$audit->append(['actor'=>$session['actor'],'action'=>'session.open','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'source'=>'console','result'=>'accepted']);
   return response()->json(['sessionId'=>$sessionId,'capability'=>$data['capability'],'signalingUrl'=>config('vremote.signaling_url'),'sessionToken'=>$tokens->issue($sessionId,$data['deviceId'],$data['capability'],$ttl),'iceServers'=>$ice,'ttlSec'=>$ttl],201);
  }
- public function destroy(string $sessionId,SessionStore $store,AuditStore $audit):JsonResponse{$s=$store->get($sessionId);if(!$s)return response()->json(null,404);$store->forget($sessionId);$audit->append(['actor'=>$s['actor']??'unknown','action'=>'session.close','deviceId'=>$s['deviceId']??null,'sessionId'=>$sessionId,'capability'=>$s['capability']??null,'source'=>$s['source']??'console','result'=>'closed']);return response()->json(null,204);}
+ public function destroy(Request $request,string $sessionId,SessionStore $store,AuditStore $audit):JsonResponse{
+  // Authorization: any actor holding a remote-view/control permission may close a session.
+  // Full owner/tenant-scoped authorization (IDOR hardening) lands in v0.2.0 — DSG-VREMOTE-002 §5/§6.
+  if(!$this->can($request,'edge.admin.view')&&!$this->can($request,'edge.admin.control'))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>'edge.admin.view required']],403);
+  $s=$store->get($sessionId);if(!$s)return response()->json(null,404);
+  $store->forget($sessionId);
+  // Push an explicit stop to the agent so screen capture ends on close, not only at TTL expiry
+  // (baseline gap H1). Best-effort: an offline agent still lets the session close.
+  if(!empty($s['deviceId']))$this->sendAgent(['type'=>'session.disable','deviceId'=>$s['deviceId'],'sessionId'=>$sessionId]);
+  $audit->append(['actor'=>$s['actor']??'unknown','action'=>'session.close','deviceId'=>$s['deviceId']??null,'sessionId'=>$sessionId,'capability'=>$s['capability']??null,'source'=>$s['source']??'console','result'=>'closed','endReason'=>'closed_by_actor']);
+  return response()->json(null,204);
+ }
  private function can(Request $r,string $p):bool{return in_array($p,(array)$r->attributes->get('permissions',[]),true);}
  private function sendAgent(array $m):bool{try{return Http::withHeader('X-VRemote-Internal-Secret',(string)config('vremote.signaling_internal_secret'))->timeout(5)->post(rtrim((string)config('vremote.signaling_internal_url'),'/').'/agent/send',$m)->successful();}catch(\Throwable){return false;}}
 }
