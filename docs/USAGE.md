@@ -28,14 +28,21 @@ từ xa qua trình duyệt. Thành phần:
 ## 2. Xác thực & phân quyền
 
 ### 2.1 Đăng nhập
-Console dùng **SSO qua platform dùng chung** (`cab.sab.com.vn`). Người dùng đăng nhập bằng
-tài khoản platform; console nhận **Bearer token** (JWT RS256 do platform phát) và gắn vào
-mọi request API qua header:
-```
-Authorization: Bearer <platform-jwt>
-```
-Backend verify token này (qua `vplus-platform/core-lib` / OIDC-JWKS) ở middleware `vremote.platform`
-và dựng ra ngữ cảnh người dùng (userId, tenantId, roles, permissions, scopes).
+Auth được **gói sẵn trong VRemote** (như S&B admin portal). Console có **màn Login riêng**:
+người dùng nhập tài khoản VPlus Platform → console gọi **`POST /api/vremote/v1/auth/login`**
+(backend proxy sang platform, nên cùng-origin, không CORS) → nhận token → lưu localStorage →
+gắn `Authorization: Bearer <token>` vào mọi request API. Gặp `401` → xoá token, quay về Login.
+
+Backend xác thực token theo 1 trong 2 chế độ (chọn qua env):
+- **Introspection (khuyến nghị, mặc định)** — `VREMOTE_PLATFORM_INTROSPECT=true`: backend
+  chuyển bearer token tới endpoint "who am I" của platform (`VREMOTE_PLATFORM_URL` +
+  `VREMOTE_PLATFORM_ME_PATH`, mặc định `/v1/me`), tin danh tính 2xx trả về, cache ngắn theo
+  token. **Chạy được với token opaque** (không cần JWT/public key).
+- **JWT verify tại chỗ** — khi introspection tắt: verify RS256 bằng `vplus-platform/core-lib`
+  + public key (`CORE_JWT_PUBLIC_KEY[_PATH]`). Chỉ dùng khi platform phát JWT.
+
+Cả hai đều dựng ra `PlatformContext` (userId, tenantId, roles, permissions, scopes) ở middleware
+`vremote.platform`.
 
 > **Chế độ dev:** khi `VREMOTE_DEV_AUTH=true` (chỉ `local`/`testing`), backend bỏ qua verify và
 > dùng actor cố định `VREMOTE_DEV_ACTOR`. **Tuyệt đối không bật ở production.**
