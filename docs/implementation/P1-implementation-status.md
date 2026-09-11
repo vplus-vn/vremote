@@ -1,5 +1,7 @@
 # VRemote P1 implementation status
 
+> **SUPERSEDED — snapshot lịch sử.** Tài liệu trạng thái canonical là [`STATUS.md`](STATUS.md). File này viết ở thời điểm sớm hơn nên liệt kê WebRTC/MediaProjection/TURN là "còn phải làm"; thực tế các phần đó đã có ở mức prototype trong baseline v0.1.0 (xem `STATUS.md` §1).
+
 ## Platform alignment
 
 Verified against `vplus-platform/control` and the current shared `sab-com-vn/platform-service` baseline:
