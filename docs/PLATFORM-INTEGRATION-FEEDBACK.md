@@ -81,9 +81,11 @@ Ghi lại để dev VRemote sau này khỏi phải mò lại:
   `bootstrap/providers.php` — nhưng **phải** để `package:discover` chạy được.
 - **Config**: `vendor/vplus-platform/core-lib/config/core.php`, merge vào key `core.*`.
   Đọc bằng `config('core.jwt.public_key_path')`.
-- **Public key mặc định**: `storage/keys/services/platform/platform_public_key.pem`
-  (tức `storage_path('keys/services/platform/platform_public_key.pem')`). Là **khóa công khai**,
-  copy giữa các service an toàn. Fleet **không** set env path — chỉ đặt file đúng chỗ.
+- **Public key**: đặt file `.pem` (khóa công khai, copy giữa service an toàn) tại
+  `storage/keys/services/platform/platform_public_key.pem`, **VÀ** khai đường dẫn tuyệt đối vào
+  `CORE_JWT_PUBLIC_KEY_PATH` — SEC-2 `config/core.php` đọc `env('CORE_JWT_PUBLIC_KEY_PATH')` không
+  có default, nên **đặt file thôi chưa đủ**, phải set env. (Đây là điểm DX-1 muốn thêm default để
+  consumer khỏi khai.)
 - **Verify**: `CheckAuthMiddleware` xác thực RS256 **tại chỗ** bằng public key (không gọi ra platform);
   set claim đã verify vào `request->attributes['auth']`. VRemote map claim đó sang `PlatformContext`
   qua `CoreLibPlatformClient` (xem `backend/app/Infrastructure/Platform/CoreLibPlatformClient.php`).
@@ -98,10 +100,12 @@ Ghi lại để dev VRemote sau này khỏi phải mò lại:
 
 Rút từ bảng env chuẩn hoá của DX-1 (`core-lib-consumer-dx.md`):
 
-- **`.env` VRemote nên set khớp default platform**:
-  `CORE_JWT_ISSUER=platform-service` (default DX-1) và `CORE_JWT_AUDIENCE` theo service; key path
-  mặc định `storage/keys/services/platform/platform_public_key.pem` (đã đặt) — không cần override nếu
-  đặt đúng chỗ.
+- **`.env` VRemote BẮT BUỘC set key path**: core-lib SEC-2 hiện tại đọc thẳng
+  `env('CORE_JWT_PUBLIC_KEY_PATH')` **không có default** → phải khai tường minh:
+  `CORE_JWT_PUBLIC_KEY_PATH=<abs>/storage/keys/services/platform/platform_public_key.pem`.
+  (DX-1 đề xuất thêm default path nhưng **chưa implement** — đúng cảnh báo "env chưa đồng bộ".)
+  `CORE_JWT_ISSUER`/`CORE_JWT_AUDIENCE` để trống = bỏ qua kiểm (siết sau nếu muốn:
+  `CORE_JWT_ISSUER=platform-service`).
 - **Pin phiên bản khi core-lib có tag**: hiện `composer.json` dùng `vplus-platform/core-lib: dev-main`
   (moving target). Khi platform tag **`0.1.0`** (mà VRemote chính là consumer kích hoạt), đổi sang
   `^0.1.0` để ổn định + biết khi contract auth đổi.
