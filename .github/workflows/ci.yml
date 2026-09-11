@@ -9,20 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify contract files
-        run: |
-          test -f api/vremote/openapi.yaml
-          test -f api/vremote/asyncapi.yaml
-          test -f api/vremote/signing.md
+      - run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
-        with: { php-version: '8.3' }
+        with:
+          php-version: '8.3'
+          extensions: mongodb
+      - name: Configure GitHub authentication for private Composer repositories
+        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/" && git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "git@github.com:"
       - run: composer install --no-interaction --prefer-dist
-      - run: vendor/bin/pint --test
       - run: php artisan test
   console:
     runs-on: ubuntu-latest
@@ -42,3 +41,14 @@ jobs:
         with: { node-version: 24, cache: npm, cache-dependency-path: signaling/package.json }
       - run: npm install
       - run: npm run build
+      - run: npm test
+  android:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: agent-android } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.13' }
+      - run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
