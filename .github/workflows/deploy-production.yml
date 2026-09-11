@@ -1,0 +1,152 @@
+name: Deploy Production
+
+# Manual-only deploy to vremote.vplus.vn from the main branch.
+# Run it from the Actions tab: "Run workflow" -> branch: main -> confirm: deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a production deploy'
+        required: true
+        default: ''
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  # Non-secret deploy targets. Override via repo Variables if the server differs.
+  DEPLOY_HOST: ${{ vars.SERVER_PROD_HOST || 'vremote.vplus.vn' }}
+  DEPLOY_USER: ${{ vars.SERVER_PROD_USER || 'deploy' }}
+  DEPLOY_PORT: ${{ vars.SERVER_PROD_PORT || '22022' }}
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/var/www/vremote.vplus.vn' }}
+
+jobs:
+  deploy:
+    # Guard: only main, and only when the operator typed the confirmation word.
+    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Fail fast if not on main
+        run: |
+          test "${{ github.ref }}" = "refs/heads/main" || { echo "Deploy only from main"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      # ---- Build backend (PHP/Laravel) ----
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mongodb
+      - name: Configure Composer auth for private packages
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
+        run: composer config --global github-oauth.github.com "$COMPOSER_TOKEN"
+      - name: Install backend dependencies (production)
+        working-directory: backend
+        run: composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
+
+      # ---- Build console (static SPA) ----
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Build console
+        working-directory: console
+        run: |
+          npm ci
+          npm run build
+
+      # ---- Build signaling (Node service) ----
+      - name: Build signaling
+        working-directory: signaling
+        run: |
+          npm ci
+          npm run build
+          npm prune --omit=dev
+
+      # ---- Assemble the release directory ----
+      - name: Assemble release
+        run: |
+          set -euo pipefail
+          REL="release"
+          mkdir -p "$REL"
+          # Backend: ship the app + vendor, exclude local-only state (storage is shared).
+          rsync -a --delete \
+            --exclude '.git' --exclude '.env' --exclude 'tests' \
+            --exclude 'storage/logs/*' --exclude 'storage/framework/cache/*' \
+            backend/ "$REL/backend/"
+          # Console: static build only.
+          mkdir -p "$REL/console"
+          cp -a console/dist "$REL/console/dist"
+          # Signaling: built output + production node_modules + manifest.
+          mkdir -p "$REL/signaling"
+          cp -a signaling/dist "$REL/signaling/dist"
+          cp -a signaling/node_modules "$REL/signaling/node_modules"
+          cp -a signaling/package.json "$REL/signaling/package.json"
+          echo "${{ github.sha }}" > "$REL/REVISION"
+
+      # ---- SSH setup ----
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_PROD_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Trust the host key (pin via the SERVER_PROD_KNOWN_HOSTS secret when available).
+          if [ -n "${{ secrets.SERVER_PROD_KNOWN_HOSTS }}" ]; then
+            echo "${{ secrets.SERVER_PROD_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+
+      # ---- Upload the release to a new timestamped directory ----
+      - name: Upload release
+        run: |
+          set -euo pipefail
+          TS="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "RELEASE_TS=$TS" >> "$GITHUB_ENV"
+          SSH="ssh -p $DEPLOY_PORT -i ~/.ssh/id_deploy"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/releases/$TS' '$DEPLOY_PATH/shared/downloads' '$DEPLOY_PATH/shared/backend-storage'"
+          rsync -az --delete -e "$SSH" release/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/releases/$TS/"
+
+      # ---- Activate the release on the server ----
+      - name: Activate release
+        run: |
+          set -euo pipefail
+          SSH="ssh -p $DEPLOY_PORT -i ~/.ssh/id_deploy"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" bash -se <<EOF
+          set -euo pipefail
+          ROOT="$DEPLOY_PATH"
+          TS="$RELEASE_TS"
+          REL="\$ROOT/releases/\$TS"
+
+          # Link shared, persistent state into the release.
+          ln -sfn "\$ROOT/shared/.env"            "\$REL/backend/.env"
+          rm -rf "\$REL/backend/storage"
+          ln -sfn "\$ROOT/shared/backend-storage"  "\$REL/backend/storage"
+          ln -sfn "\$ROOT/shared/downloads"        "\$REL/console/dist/downloads" || true
+
+          cd "\$REL/backend"
+          php artisan migrate --force || true
+          php artisan optimize:clear
+          # NOTE: config:cache is intentionally NOT run yet — request-path env() reads
+          # (VPlus keys) must move to config first (DSG-VREMOTE-002 §4). Enable later.
+
+          # Atomic flip.
+          ln -sfn "\$REL" "\$ROOT/current"
+
+          # Reload services (deploy user needs NOPASSWD sudo for exactly these).
+          sudo /usr/bin/systemctl restart vremote-signaling
+          sudo /usr/bin/systemctl reload php8.3-fpm || sudo /usr/bin/systemctl restart php8.3-fpm
+          sudo /usr/bin/systemctl reload nginx
+
+          # Keep the last 5 releases.
+          cd "\$ROOT/releases" && ls -1dt */ | tail -n +6 | xargs -r rm -rf
+          EOF
+
+      - name: Smoke check
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DEPLOY_HOST/api/health" || true)
+          echo "GET https://$DEPLOY_HOST/api/health -> $code"
+          test "$code" = "200" || { echo "Health check did not return 200"; exit 1; }

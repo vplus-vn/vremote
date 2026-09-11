@@ -2,6 +2,8 @@
 return [
     'default' => env('DB_CONNECTION', 'sqlite'),
     'connections' => [
+        // Production persistence for VRemote domain data (device/session/command/audit
+        // and the v0.2.0 device-lifecycle collections). Requires mongodb/laravel-mongodb.
         // Production persistence for VRemote domain data (DSG-VREMOTE-002 §3).
         // Requires mongodb/laravel-mongodb. See backend/.env.example.
         'mongodb' => [
@@ -12,6 +14,11 @@ return [
             'username' => env('MONGODB_USERNAME'),
             'password' => env('MONGODB_PASSWORD'),
             'options' => [
+                // authSource — the database that holds the user credentials.
+                'database' => env('MONGODB_AUTHENTICATION_DATABASE', env('MONGODB_DATABASE', 'vremote')),
+            ],
+        ],
+        // Kept for local/testing convenience; not used in production.
                 'database' => env('MONGODB_AUTHENTICATION_DATABASE', env('MONGODB_DATABASE', 'vremote')),
             ],
         ],

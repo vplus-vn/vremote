@@ -1,0 +1,33 @@
+# VRemote signaling service (Node/WebSocket control plane — no media).
+# Install as /etc/systemd/system/vremote-signaling.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now vremote-signaling
+# The deploy workflow restarts this unit after each release symlink flip.
+#
+# Prerequisites:
+#   - system user `vremote` (adduser --system --group --no-create-home vremote)
+#   - Node.js runtime on PATH (adjust ExecStart if node lives elsewhere)
+#   - <deploy>/shared/signaling.env populated from signaling/.env.example
+#   - the release ships signaling/{dist,node_modules,package.json}
+
+[Unit]
+Description=VRemote signaling service
+After=network.target
+
+[Service]
+Type=simple
+User=vremote
+Group=vremote
+WorkingDirectory=/var/www/vremote.vplus.vn/current/signaling
+EnvironmentFile=/var/www/vremote.vplus.vn/shared/signaling.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=3
+# Bind only to loopback via env (PORT/INTERNAL_PORT); nginx fronts the public side.
+# Hardening:
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
