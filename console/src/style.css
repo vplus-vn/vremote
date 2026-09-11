@@ -1,1 +1,14 @@
 :root{font-family:Inter,system-ui,sans-serif;color:#1f2937;background:#f5f7fa}body{margin:0}main{max-width:1200px;margin:0 auto;padding:24px}header{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid #ddd;padding-bottom:16px}h1{margin:0}header span{color:#6b7280}.error{margin:16px 0;padding:12px;border:1px solid #f3b0b0;border-radius:8px;background:#fff5f5}section{margin-top:24px;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #eee}button{padding:6px 12px;border-radius:6px;border:1px solid #bbb;background:white;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+
+/* Auth */
+.header-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
+.logout{border-color:#d1a3a3}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:360px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:14px}
+.login-card h1{margin:0}
+.login-card .sub{color:#6b7280;margin-top:-10px}
+.login-card label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#374151}
+.login-card input{padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px}
+.login-card button{padding:10px 12px;background:#2563eb;color:#fff;border-color:#2563eb;font-size:15px}
+.login-card button:disabled{opacity:.55}
+.login-card .hint{margin:0;color:#9ca3af;font-size:13px;text-align:center}

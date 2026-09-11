@@ -4,6 +4,13 @@ return [
     'session_ttl' => (int) env('VREMOTE_SESSION_TTL', 1800),
     // Single VPlus Platform integration point (DSG-VREMOTE-002 §4). No VREMOTE_PLATFORM_MODE.
     'platform_url' => env('VREMOTE_PLATFORM_URL', ''),
+    // Introspection auth (like the S&B admin portal): forward the caller's bearer token
+    // to the Platform's "who am I" endpoint instead of verifying a JWT locally. Works with
+    // OPAQUE Platform tokens. When on (and platform_url set) it is the primary PlatformClient.
+    'platform_introspect' => filter_var(env('VREMOTE_PLATFORM_INTROSPECT', false), FILTER_VALIDATE_BOOL),
+    'platform_me_path' => env('VREMOTE_PLATFORM_ME_PATH', '/v1/me'),
+    'platform_login_path' => env('VREMOTE_PLATFORM_LOGIN_PATH', '/v1/auth/login'),
+    'introspect_ttl' => (int) env('VREMOTE_INTROSPECT_TTL', 30),
     'dev_auth' => filter_var(env('VREMOTE_DEV_AUTH', false), FILTER_VALIDATE_BOOL),
     'dev_actor' => env('VREMOTE_DEV_ACTOR', 'local-admin'),
     // Platform-issued JWT verification (moved out of the request path's env() reads so

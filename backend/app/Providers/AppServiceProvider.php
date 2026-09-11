@@ -28,6 +28,7 @@ use App\Infrastructure\Persistence\Mongo\MongoRevokedSessionRepository;
 use App\Infrastructure\Platform\CoreLibPlatformClient;
 use App\Infrastructure\Platform\FakePlatformClient;
 use App\Infrastructure\Platform\HttpPlatformClient;
+use App\Infrastructure\Platform\IntrospectionPlatformClient;
 use App\Infrastructure\Platform\JwtPlatformClient;
 use App\Infrastructure\Platform\OidcPlatformClient;
 use App\Services\AuditStore;
@@ -79,6 +80,18 @@ final class AppServiceProvider extends ServiceProvider
             $devAuth = (bool) config('vremote.dev_auth', false);
             if ($devAuth && $this->app->environment(['local', 'testing'])) {
                 return new FakePlatformClient(actor: (string) config('vremote.dev_actor', 'local-admin'));
+            }
+
+            // Introspection (like the S&B admin portal): ask the Platform "who is this token?"
+            // instead of verifying a JWT locally. The right path when the Platform issues OPAQUE
+            // tokens. Enabled by VREMOTE_PLATFORM_INTROSPECT with VREMOTE_PLATFORM_URL set.
+            $platformUrlIntrospect = (string) config('vremote.platform_url', '');
+            if ((bool) config('vremote.platform_introspect', false) && $platformUrlIntrospect !== '') {
+                return new IntrospectionPlatformClient(
+                    $platformUrlIntrospect,
+                    (string) config('vremote.platform_me_path', '/v1/me'),
+                    (int) config('vremote.introspect_ttl', 30),
+                );
             }
 
             // Primary: shared vplus-platform/core-lib auth (house standard). Only when a
