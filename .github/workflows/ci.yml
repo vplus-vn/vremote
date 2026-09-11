@@ -1,4 +1,14 @@
 name: VRemote CI
+# Runs on a SELF-HOSTED runner (org is on the Free plan; GitHub-hosted minutes are
+# capped for private repos). Register a runner at
+#   https://github.com/vplus-vn/vremote/settings/actions/runners
+# on the vremote.vplus.vn server. Runner host prerequisites (the setup-* actions
+# download PHP/Node/Java/Gradle themselves, but need a working base):
+#   - Ubuntu/Debian x64 with sudo, git, curl, unzip and outbound internet
+#   - `mongodb` PHP extension buildable (php-pear/phpize or apt) for the backend job
+#   - the `android` job additionally needs the Android SDK (ANDROID_HOME +
+#     cmdline-tools/platform/build-tools); GitHub-hosted images ship it, a bare
+#     server does not — install it or that job will fail at assembleDebug.
 on:
   push:
     branches: [main, 'feat/**']
@@ -6,12 +16,12 @@ on:
     branches: [main]
 jobs:
   contract:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
   backend:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +36,7 @@ jobs:
       - run: composer install --no-interaction --prefer-dist
       - run: php artisan test
   console:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults: { run: { working-directory: console } }
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +45,7 @@ jobs:
       - run: npm install
       - run: npm run build
   signaling:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults: { run: { working-directory: signaling } }
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +55,7 @@ jobs:
       - run: npm run build
       - run: npm test
   android:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults: { run: { working-directory: agent-android } }
     steps:
       - uses: actions/checkout@v4
