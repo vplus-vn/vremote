@@ -4,6 +4,10 @@
 
 Deliver VRemote as the Vplus remote monitoring/control product for Android edge boxes. The current release target is a production-deployable P1 Monitor stack: authenticated web console, device registry, scoped sessions, backend signing, authenticated signaling, STUN/TURN, WebRTC screen viewing, Android Agent, audit, and safe commands.
 
+## Standardization (v0.2.0)
+
+The current baseline `vremote_v0.1.0` is a Monitor-first prototype. The active work is **Platform Standardization v0.2.0** (handoff `vplus-vn/vremote#7`): DDD layering, DB + repository persistence, a single Platform integration point `VREMOTE_PLATFORM_URL` (no auth silo, no `VREMOTE_PLATFORM_MODE`), authorization by Tenant/Role/Permission/Scope/Access-Grant, and full device lifecycle (enrollment/credential/reset/transfer). See `docs/design/DSG-VREMOTE-002-platform-standardization.md` and `docs/implementation/STATUS.md`.
+
 ## Engineering mode
 
 - Work contract-first. `api/vremote` v0.0.1 is locked unless an explicit contract change is approved.

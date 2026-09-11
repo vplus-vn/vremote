@@ -12,6 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'vremote.auth' => App\Http\Middleware\VRemoteAuth::class,
+            // v0.1.2: single Platform integration point (DSG-VREMOTE-002 §4).
+            'vremote.platform' => App\Http\Middleware\ResolvePlatformContext::class,
         ]);
     })
     ->create();

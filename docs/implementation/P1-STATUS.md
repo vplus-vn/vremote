@@ -1,5 +1,7 @@
 # VRemote P1 implementation status
 
+> **SUPERSEDED — snapshot lịch sử.** Tài liệu trạng thái canonical là [`STATUS.md`](STATUS.md). File này là ảnh chụp lạc quan của giai đoạn P1; một số mục "implemented" ở đây thực chất còn ở mức prototype (xem `STATUS.md` §1).
+
 ## Usable P1 implemented
 
 - Contract `api/vremote` v0.0.1 retained unchanged.
