@@ -20,7 +20,9 @@ jobs:
           php-version: '8.3'
           extensions: mongodb
       - name: Configure GitHub authentication for private Composer repositories
-        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/" && git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "git@github.com:"
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
+        run: composer config --global github-oauth.github.com "$COMPOSER_TOKEN"
       - run: composer install --no-interaction --prefer-dist
       - run: php artisan test
   console:
@@ -52,3 +54,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.13' }
       - run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - name: Upload Android agent APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vremote-agent-debug-apk
+          path: agent-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
