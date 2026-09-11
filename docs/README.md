@@ -6,11 +6,15 @@ Tài liệu canonical của **VRemote** — hệ thống quản trị và điề
 
 | Nhóm | Tài liệu |
 |---|---|
+| **Cài đặt & triển khai** | [`INSTALL.md`](INSTALL.md) — runbook cài đặt thủ công lên production |
+| **Sử dụng** | [`USAGE.md`](USAGE.md) — console, REST API, vòng đời thiết bị |
 | Yêu cầu | [`requirements/REQ-VREMOTE-001-remote-admin.md`](requirements/REQ-VREMOTE-001-remote-admin.md) |
 | Kiến trúc domain | [`design/DSG-VREMOTE-001-remote-admin-architecture.md`](design/DSG-VREMOTE-001-remote-admin-architecture.md) |
 | Chuẩn hóa v0.2.0 | [`design/DSG-VREMOTE-002-platform-standardization.md`](design/DSG-VREMOTE-002-platform-standardization.md) |
 | Trạng thái (canonical) | [`implementation/STATUS.md`](implementation/STATUS.md) |
-| Runbook | [`implementation/RUNBOOK.md`](implementation/RUNBOOK.md) |
+| Runbook (nội bộ) | [`implementation/RUNBOOK.md`](implementation/RUNBOOK.md) |
+
+> Cài đặt bằng CI/CD: xem [`../deploy/DEPLOY.md`](../deploy/DEPLOY.md). Hợp đồng API máy-đọc: [`../api/vremote/`](../api/vremote/).
 
 > `implementation/P1-STATUS.md` và `implementation/P1-implementation-status.md` là snapshot lịch sử của P1, đã *superseded* bởi `STATUS.md`.
 
