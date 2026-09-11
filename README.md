@@ -4,42 +4,48 @@ VRemote is the Vplus remote screen monitoring/control product for Android edge b
 
 ## Architecture
 
-VRemote is built on the shared **vplus-platform** baseline. The platform reference identifies `sab-com-vn/platform-service` as the existing shared capability layer for Identity, RBAC, tenant context, Audit, Storage and related middleware; VRemote must reuse those capabilities rather than duplicate them.
-
-P1 is Monitor-first: registry/provisioning, SSO/RBAC, session/token, WebSocket signaling, STUN/TURN, browser WebRTC receive pipeline, audit, and Android screen capture.
-
-P2 adds input/control; P3 adds fleet and product integrations.
+VRemote is built on the shared **vplus-platform** baseline. P1 is Monitor-first: registry, session/token, signaling, STUN/TURN, browser WebRTC receive, and Android screen capture. P2 adds input/control; P3 adds fleet/integrations.
 
 ## Contract-first
 
-`api/vremote` version `0.0.1` is the source of truth. Contract changes require an explicit project decision before implementation.
+`api/vremote` version `0.0.1` is the source of truth. Do not change it unilaterally.
 
-- `api/vremote/openapi.yaml` — REST contract
-- `api/vremote/asyncapi.yaml` — signaling/agent WebSocket contract
-- `api/vremote/signing.md` — HMAC signing and golden vectors
+- `api/vremote/openapi.yaml` — REST
+- `api/vremote/asyncapi.yaml` — realtime channels
+- `api/vremote/signing.md` — HMAC and golden vectors
 
-Media and input travel directly over WebRTC. WebSocket is signaling/control-plane only.
+Media/input travel directly over WebRTC; WebSocket is control/signaling only. Backend is the only component that signs `session.enable`/`command`.
 
-## Platform baseline
+## Runnable stack
 
-- Backend: Laravel/PHP baseline from `sab-com-vn/platform-service` (PHP 8.3, Laravel 13, MongoDB, nwidart modules, PHPUnit/Pint).
-- Identity/RBAC/tenant/audit: reuse platform capabilities.
-- Console: Vite + React + TypeScript, matching `sab-com-vn/admin-portal`.
-- Signaling: keep the first implementation small and platform-compatible; WebSocket signaling must not carry media/input.
-- Android agent: Kotlin + MediaProjection + MediaCodec + libwebrtc; P2 input via AccessibilityService.
-- TURN: coturn with short-lived credentials.
+Prerequisites: Docker + Docker Compose.
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:5173`. The compose profile includes Laravel backend (`:8080`), browser console (`:5173`), signaling (`:8787`) and coturn (`:3478`). The bundled `DEV-001` is a development registry entry; a real Android agent must be online before opening a session.
+
+For the Android agent, build `agent-android` with Android Studio/Gradle, install the APK, and configure:
+
+- Device ID
+- per-device device token (must match backend registry)
+- Agent WebSocket URL, e.g. `ws://<vremote-host>:8787/agent`
+- TURN URL and the same TURN shared secret used by coturn/backend
+
+Press **Enable VRemote Agent** and approve Android MediaProjection once. Screen capture remains OFF until the backend sends a valid signed `session.enable`; the agent verifies timestamp, nonce and HMAC before starting capture.
+
+## Production hardening
+
+Set `VREMOTE_DEV_AUTH=false` and integrate the backend bearer middleware with the vplus Identity/SSO gateway. Replace all example secrets. Use TLS/WSS, a managed secret store, persistent platform registry/audit, and a real production TURN hostname. The development JSON registry is intentionally a small bootstrap boundary; production device registry must be backed by the shared platform capability.
 
 ## Security invariants
 
 - No inbound port is opened on the box.
 - Screen sharing is OFF by default.
-- Backend alone signs `session.enable` and `command`.
-- `edge.admin.view` and `edge.admin.control` are separate permissions.
+- Backend alone signs session commands.
+- `edge.admin.view` and `edge.admin.control` are separate.
 - GATED operations are OFF by default.
-- Device tokens are scoped per box and never logged.
+- Device tokens are never returned by the device API.
 - Timestamp skew and nonce replay protection follow `signing.md`.
-- VBridge lock-control contract is out of scope.
-
-## Development
-
-Follow the platform repository governance: work on a branch, validate with automated tests, and merge through Pull Request. Never change `api/vremote` unilaterally.
+- VBridge lock-control is out of scope.
