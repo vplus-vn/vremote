@@ -20,7 +20,12 @@ jobs:
           php-version: '8.3'
           extensions: mongodb
       - name: Configure GitHub authentication for private Composer repositories
-        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/" && git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "git@github.com:"
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSE_TOKEN }}
+        run: |
+          TOKEN="${COMPOSER_TOKEN:-${{ github.token }} }"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
       - run: composer install --no-interaction --prefer-dist
       - run: php artisan test
   console:
