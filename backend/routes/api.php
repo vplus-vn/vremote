@@ -1,9 +1,13 @@
 <?php
-use App\Http\Controllers\AuditController;use App\Http\Controllers\CommandController;use App\Http\Controllers\DeviceController;use App\Http\Controllers\EnrollmentController;use App\Http\Controllers\IntegrationController;use App\Http\Controllers\SessionController;use App\Http\Controllers\TransferController;use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuditController;use App\Http\Controllers\AuthController;use App\Http\Controllers\CommandController;use App\Http\Controllers\DeviceController;use App\Http\Controllers\EnrollmentController;use App\Http\Controllers\IntegrationController;use App\Http\Controllers\SessionController;use App\Http\Controllers\TransferController;use Illuminate\Support\Facades\Route;
 // House standard (vplus-platform, as applied at sab-com-vn): every service owns
 // /api/{service}/v1/{resource}. Laravel prefixes routes/api.php with `api`, so the
 // `vremote/v1` group resolves to /api/vremote/v1/... and health to /api/vremote/health.
 Route::get('/vremote/health',static fn()=>response()->json(['status'=>'ok','service'=>'vremote-backend']));
+// Login is proxied to the Platform (no local auth) so the console authenticates through
+// VRemote's own origin, like the S&B admin portal. `me` is behind the platform middleware.
+Route::post('/vremote/v1/auth/login',[AuthController::class,'login']);
+Route::get('/vremote/v1/auth/me',[AuthController::class,'me'])->middleware('vremote.platform');
 Route::prefix('vremote/v1')->middleware('vremote.platform')->group(function (): void {
  Route::get('/devices',[DeviceController::class,'index']);Route::get('/devices/{deviceId}',[DeviceController::class,'show']);
  Route::post('/sessions',[SessionController::class,'store']);Route::delete('/sessions/{sessionId}',[SessionController::class,'destroy']);

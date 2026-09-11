@@ -189,8 +189,10 @@ Các khóa bắt buộc điền (xem đầy đủ trong `backend/.env.example`):
 | App | `APP_KEY` | `php artisan key:generate` (hoặc điền base64 32 byte) |
 | App | `APP_ENV=production` `APP_DEBUG=false` | |
 | Auth | `VREMOTE_DEV_AUTH=false` | **BẮT BUỘC false** ở production |
-| Auth | `VREMOTE_PLATFORM_URL=https://cab.sab.com.vn` | SSO dùng chung platform |
-| Auth | `CORE_JWT_PUBLIC_KEY(_PATH)` | Khóa công khai issuer để verify JWT (nếu dùng core-lib) |
+| Auth | `VREMOTE_PLATFORM_URL=https://cab.sab.com.vn/api/platform` | base platform, có `/api/platform` |
+| Auth | `VREMOTE_PLATFORM_INTROSPECT=true` | **khuyến nghị** — verify token qua platform (hợp token opaque) |
+| Auth | `VREMOTE_PLATFORM_ME_PATH=/v1/me` `VREMOTE_PLATFORM_LOGIN_PATH=/v1/auth/login` | path thật của platform (chỉnh nếu khác) |
+| Auth | `CORE_JWT_PUBLIC_KEY(_PATH)` | *(chỉ khi introspection=false)* khóa công khai verify JWT qua core-lib |
 | DB | `SERVICES=vremote` | DB/user/auth-db suy ra từ đây |
 | DB | `MONGODB_HOST/PORT` | vd `127.0.0.1` / cổng thật |
 | DB | `MONGODB_PASSWORD` | mật khẩu thật của `vremote_user` |
