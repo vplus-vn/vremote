@@ -22,8 +22,10 @@ jobs:
       - name: Configure GitHub authentication for private Composer repositories
         env:
           COMPOSER_TOKEN: ${{ secrets.COMPOSE_TOKEN }}
+          GITHUB_ACTIONS_TOKEN: ${{ github.token }}
         run: |
-          TOKEN="${COMPOSER_TOKEN:-${{ github.token }} }"
+          TOKEN="${COMPOSER_TOKEN}"
+          if [ -z "$TOKEN" ]; then TOKEN="$GITHUB_ACTIONS_TOKEN"; fi
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
       - run: composer install --no-interaction --prefer-dist
