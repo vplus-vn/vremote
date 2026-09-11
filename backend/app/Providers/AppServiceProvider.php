@@ -28,6 +28,7 @@ use App\Infrastructure\Persistence\Mongo\MongoRevokedSessionRepository;
 use App\Infrastructure\Platform\FakePlatformClient;
 use App\Infrastructure\Platform\HttpPlatformClient;
 use App\Infrastructure\Platform\JwtPlatformClient;
+use App\Infrastructure\Platform\OidcPlatformClient;
 use App\Services\AuditStore;
 use App\Services\CommandStore;
 use App\Services\SessionStore;
@@ -64,13 +65,21 @@ final class AppServiceProvider extends ServiceProvider
 
         // Single Platform integration point (no VREMOTE_PLATFORM_MODE). Selection is
         // config-driven, not a mode toggle:
-        //   - local/testing dev-auth -> Fake (real adapter, fixed context)
-        //   - a Platform public key configured -> verify the Platform-issued JWT locally
-        //   - otherwise -> HTTP introspection against VREMOTE_PLATFORM_URL
+        //   - local/testing dev-auth        -> Fake (real adapter, fixed context)
+        //   - VREMOTE_PLATFORM_URL set       -> OIDC: verify RS256 JWT via the platform
+        //                                       JWKS (.well-known/openid-configuration) —
+        //                                       the confirmed sab-com-vn/platform-service contract
+        //   - a static Platform public key   -> verify the Platform-issued JWT with that key
+        //   - otherwise                      -> HTTP introspection against the platform
         $this->app->bind(PlatformClient::class, function (): PlatformClient {
             $devAuth = (bool) config('vremote.dev_auth', false);
             if ($devAuth && $this->app->environment(['local', 'testing'])) {
                 return new FakePlatformClient(actor: (string) config('vremote.dev_actor', 'local-admin'));
+            }
+
+            $platformUrl = (string) config('vremote.platform_url', '');
+            if ($platformUrl !== '') {
+                return new OidcPlatformClient($platformUrl, (string) config('vremote.jwt_alg', 'RS256'));
             }
 
             $publicKey = (string) config('vremote.jwt_public_key', '');
@@ -78,7 +87,7 @@ final class AppServiceProvider extends ServiceProvider
                 return new JwtPlatformClient($publicKey, (string) config('vremote.jwt_alg', 'RS256'));
             }
 
-            return new HttpPlatformClient((string) config('vremote.platform_url', ''));
+            return new HttpPlatformClient($platformUrl);
         });
     }
 
