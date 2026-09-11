@@ -27,6 +27,7 @@ use App\Infrastructure\Persistence\Mongo\MongoNonceRepository;
 use App\Infrastructure\Persistence\Mongo\MongoRevokedSessionRepository;
 use App\Infrastructure\Platform\FakePlatformClient;
 use App\Infrastructure\Platform\HttpPlatformClient;
+use App\Infrastructure\Platform\JwtPlatformClient;
 use App\Services\AuditStore;
 use App\Services\CommandStore;
 use App\Services\SessionStore;
@@ -61,12 +62,20 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->bind(NonceRepository::class, MongoNonceRepository::class);
         $this->app->bind(RevokedSessionRepository::class, MongoRevokedSessionRepository::class);
 
-        // Single Platform integration point. Fake only in local/testing dev-auth;
-        // production always talks to VREMOTE_PLATFORM_URL. No VREMOTE_PLATFORM_MODE.
+        // Single Platform integration point (no VREMOTE_PLATFORM_MODE). Selection is
+        // config-driven, not a mode toggle:
+        //   - local/testing dev-auth -> Fake (real adapter, fixed context)
+        //   - a Platform public key configured -> verify the Platform-issued JWT locally
+        //   - otherwise -> HTTP introspection against VREMOTE_PLATFORM_URL
         $this->app->bind(PlatformClient::class, function (): PlatformClient {
             $devAuth = (bool) config('vremote.dev_auth', false);
             if ($devAuth && $this->app->environment(['local', 'testing'])) {
                 return new FakePlatformClient(actor: (string) config('vremote.dev_actor', 'local-admin'));
+            }
+
+            $publicKey = (string) config('vremote.jwt_public_key', '');
+            if ($publicKey !== '') {
+                return new JwtPlatformClient($publicKey, (string) config('vremote.jwt_alg', 'RS256'));
             }
 
             return new HttpPlatformClient((string) config('vremote.platform_url', ''));

@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 namespace App\Http\Controllers;
-use App\Services\AuditStore;use App\Services\DeviceRegistry;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
+use App\Application\Authorization\AuthorizationService;use App\Domain\Platform\PlatformContext;use App\Services\AuditStore;use App\Services\DeviceRegistry;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
 final class SessionController {
- public function store(Request $request,DeviceRegistry $registry,SessionStore $store,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit):JsonResponse{
-  $data=$request->validate(['deviceId'=>['required','string','max:128'],'capability'=>['required','in:view,control'],'preferredMaxFps'=>['nullable','integer','min:1','max:60']]);$perm=$data['capability']==='view'?'edge.admin.view':'edge.admin.control';if(!$this->can($request,$perm))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>$perm.' required']],403);
+ public function store(Request $request,DeviceRegistry $registry,SessionStore $store,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit,AuthorizationService $authz):JsonResponse{
+  $data=$request->validate(['deviceId'=>['required','string','max:128'],'capability'=>['required','in:view,control'],'preferredMaxFps'=>['nullable','integer','min:1','max:60']]);$perm=$data['capability']==='view'?'edge.admin.view':'edge.admin.control';
+  if(($resp=$this->authorizeDevice($request,$authz,$data['deviceId'],$perm))!==null)return $resp;
   $device=$registry->get($data['deviceId']);if(!$device)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'Device not found']],404);if(($device['status']??'offline')!=='online')return response()->json(['error'=>['code'=>'DEVICE_OFFLINE','message'=>'Device is offline']],503);if(empty($device['deviceToken']))return response()->json(['error'=>['code'=>'DEVICE_NOT_PROVISIONED','message'=>'Device signing key unavailable']],503);
   $ttl=(int)config('vremote.session_ttl',1800);$sessionId='S-'.Str::upper(Str::random(12));$nonce=bin2hex(random_bytes(16));$ts=time();$sig=$signer->sign((string)$device['deviceToken'],$signer->canonicalSessionEnable(['deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts]));
   $session=['sessionId'=>$sessionId,'deviceId'=>$data['deviceId'],'capability'=>$data['capability'],'ttlSec'=>$ttl,'createdAt'=>now()->toIso8601String(),'actor'=>$request->attributes->get('actor','unknown'),'source'=>'console'];$store->put($session);
@@ -26,5 +27,13 @@ final class SessionController {
   return response()->json(null,204);
  }
  private function can(Request $r,string $p):bool{return in_array($p,(array)$r->attributes->get('permissions',[]),true);}
+ // Tenant-scoped authorization (DSG-VREMOTE-002 §5). When enforce_tenant is on, the caller
+ // must own the device's tenant (or hold an access grant) AND have the permission; otherwise
+ // (migration default) fall back to the permission-only check to preserve current behavior.
+ private function authorizeDevice(Request $r,AuthorizationService $authz,string $deviceId,string $perm):?JsonResponse{
+  if((bool)config('vremote.enforce_tenant',false)){$ctx=$r->attributes->get('platformContext');if(!$ctx instanceof PlatformContext||!$authz->canActOnDevice($ctx,$deviceId,$perm))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>'not authorized for this device ('.$perm.')']],403);return null;}
+  if(!$this->can($r,$perm))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>$perm.' required']],403);
+  return null;
+ }
  private function sendAgent(array $m):bool{try{return Http::withHeader('X-VRemote-Internal-Secret',(string)config('vremote.signaling_internal_secret'))->timeout(5)->post(rtrim((string)config('vremote.signaling_internal_url'),'/').'/agent/send',$m)->successful();}catch(\Throwable){return false;}}
 }
