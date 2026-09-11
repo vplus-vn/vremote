@@ -2,6 +2,19 @@
 return [
     'default' => env('DB_CONNECTION', 'sqlite'),
     'connections' => [
+        // Production persistence for VRemote domain data (DSG-VREMOTE-002 §3).
+        // Requires mongodb/laravel-mongodb. See backend/.env.example.
+        'mongodb' => [
+            'driver' => 'mongodb',
+            'host' => env('MONGODB_HOST', '127.0.0.1'),
+            'port' => (int) env('MONGODB_PORT', 27017),
+            'database' => env('MONGODB_DATABASE', 'vremote'),
+            'username' => env('MONGODB_USERNAME'),
+            'password' => env('MONGODB_PASSWORD'),
+            'options' => [
+                'database' => env('MONGODB_AUTHENTICATION_DATABASE', env('MONGODB_DATABASE', 'vremote')),
+            ],
+        ],
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),

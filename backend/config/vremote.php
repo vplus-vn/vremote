@@ -2,6 +2,18 @@
 return [
     'signing' => ['skew_seconds' => 300],
     'session_ttl' => (int) env('VREMOTE_SESSION_TTL', 1800),
+    // Single VPlus Platform integration point (DSG-VREMOTE-002 §4). No VREMOTE_PLATFORM_MODE.
+    'platform_url' => env('VREMOTE_PLATFORM_URL', ''),
+    'dev_auth' => filter_var(env('VREMOTE_DEV_AUTH', false), FILTER_VALIDATE_BOOL),
+    'dev_actor' => env('VREMOTE_DEV_ACTOR', 'local-admin'),
+    // Platform-issued JWT verification (moved out of the request path's env() reads so
+    // `php artisan config:cache` is safe). The key is the VPlus identity issuer public key.
+    'jwt_public_key' => env('VPLUS_USER_PUBLIC_KEY', ''),
+    'jwt_alg' => env('VPLUS_JWT_ALG', 'RS256'),
+    // Tenant-ownership enforcement (DSG-VREMOTE-002 §5). Default OFF during migration so
+    // devices without an ownerTenantId (not yet enrolled) keep working; enable once the
+    // fleet is enrolled and every device carries ownerTenantId.
+    'enforce_tenant' => filter_var(env('VREMOTE_ENFORCE_TENANT', false), FILTER_VALIDATE_BOOL),
     'signaling_url' => env('VREMOTE_SIGNALING_URL', 'ws://localhost:8787/signaling'),
     'signaling_internal_url' => env('VREMOTE_SIGNALING_INTERNAL_URL', 'http://localhost:8788'),
     'signaling_internal_secret' => env('VREMOTE_SIGNALING_INTERNAL_SECRET', ''),
