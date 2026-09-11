@@ -25,6 +25,7 @@ use App\Infrastructure\Persistence\Mongo\MongoDeviceTransferRepository;
 use App\Infrastructure\Persistence\Mongo\MongoEnrollmentRepository;
 use App\Infrastructure\Persistence\Mongo\MongoNonceRepository;
 use App\Infrastructure\Persistence\Mongo\MongoRevokedSessionRepository;
+use App\Infrastructure\Platform\CoreLibPlatformClient;
 use App\Infrastructure\Platform\FakePlatformClient;
 use App\Infrastructure\Platform\HttpPlatformClient;
 use App\Infrastructure\Platform\JwtPlatformClient;
@@ -65,16 +66,30 @@ final class AppServiceProvider extends ServiceProvider
 
         // Single Platform integration point (no VREMOTE_PLATFORM_MODE). Selection is
         // config-driven, not a mode toggle:
-        //   - local/testing dev-auth        -> Fake (real adapter, fixed context)
-        //   - VREMOTE_PLATFORM_URL set       -> OIDC: verify RS256 JWT via the platform
-        //                                       JWKS (.well-known/openid-configuration) —
-        //                                       the confirmed sab-com-vn/platform-service contract
-        //   - a static Platform public key   -> verify the Platform-issued JWT with that key
-        //   - otherwise                      -> HTTP introspection against the platform
+        //   - local/testing dev-auth         -> Fake (real adapter, fixed context)
+        //   - core-lib JWT key configured    -> CoreLib: house-standard verification via
+        //                                        vplus-platform/core-lib CheckAuthMiddleware
+        //                                        (RS256 + iss/aud + TenantContext), same as
+        //                                        the other vplus-platform services (#12)
+        //   - VREMOTE_PLATFORM_URL set        -> OIDC fallback: verify RS256 JWT via the
+        //                                        platform JWKS (.well-known/openid-configuration)
+        //   - a static Platform public key    -> JWT fallback: verify with that key
+        //   - otherwise                       -> HTTP introspection against the platform
         $this->app->bind(PlatformClient::class, function (): PlatformClient {
             $devAuth = (bool) config('vremote.dev_auth', false);
             if ($devAuth && $this->app->environment(['local', 'testing'])) {
                 return new FakePlatformClient(actor: (string) config('vremote.dev_actor', 'local-admin'));
+            }
+
+            // Primary: shared vplus-platform/core-lib auth (house standard). Only when a
+            // core-lib JWT public key is actually configured; otherwise fall through to the
+            // standards-based fallbacks so the stack keeps working during migration.
+            if ($this->coreLibJwtConfigured()) {
+                try {
+                    return $this->app->make(CoreLibPlatformClient::class);
+                } catch (\Throwable) {
+                    // Misconfigured core-lib key (e.g. path missing): use the fallback below.
+                }
             }
 
             $platformUrl = (string) config('vremote.platform_url', '');
@@ -91,7 +106,21 @@ final class AppServiceProvider extends ServiceProvider
         });
     }
 
-    public function boot(): void
+    /**
+     * Whether core-lib has a usable JWT public key configured (inline PEM or a readable
+     * key file), which is what CheckAuthMiddleware needs to verify Platform tokens.
+     */
+    private function coreLibJwtConfigured(): bool
     {
+        $inline = (string) config('core.jwt.public_key', '');
+        if (trim($inline) !== '') {
+            return true;
+        }
+
+        $path = (string) config('core.jwt.public_key_path', '');
+
+        return trim($path) !== '' && is_file($path);
     }
+
+    public function boot(): void {}
 }
