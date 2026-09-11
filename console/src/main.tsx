@@ -4,6 +4,7 @@ import './style.css';
 
 type Device={deviceId:string;machineCode?:string|null;name?:string|null;status:string};
 type Grant={sessionId:string;capability:string;signalingUrl:string;sessionToken:string;iceServers:RTCIceServer[];ttlSec:number};
+const agentDownloadUrl=import.meta.env.VITE_AGENT_DOWNLOAD_URL??'/downloads/vremote-agent.apk';
 
 function App(){
  const [devices,setDevices]=React.useState<Device[]>([]); const [error,setError]=React.useState(''); const [grant,setGrant]=React.useState<Grant|null>(null); const video=React.useRef<HTMLVideoElement>(null); const pc=React.useRef<RTCPeerConnection|null>(null); const ws=React.useRef<WebSocket|null>(null);
@@ -17,6 +18,6 @@ function App(){
    peer.onicecandidate=e=>{if(e.candidate&&sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'candidate',sessionId:g.sessionId,candidate:e.candidate.toJSON()}));};
  }catch(e){setError(e instanceof Error?e.message:String(e));}}
  function close(){const currentGrant=grant;if(ws.current){try{ws.current.close()}catch{}ws.current=null} if(pc.current){pc.current.close();pc.current=null} if(currentGrant){void fetch(`/api/v1/sessions/${currentGrant.sessionId}`,{method:'DELETE'}).catch(()=>{});setGrant(null)}}
- return <main><header><h1>VRemote</h1><span>Remote Edge Monitor</span></header>{error&&<div className="error">{error}</div>}<section><h2>Devices</h2><table><thead><tr><th>Device</th><th>Machine</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.status}</td><td><button disabled={d.status!=='online'} onClick={()=>view(d)}>View</button></td></tr>)}{!devices.length&&<tr><td colSpan={4}>Chưa có thiết bị.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={close}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>
+ return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><a className="download" href={agentDownloadUrl}>Download Android Agent</a></header>{error&&<div className="error">{error}</div>}<section><h2>Devices</h2><table><thead><tr><th>Device</th><th>Machine</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.status}</td><td><button disabled={d.status!=='online'} onClick={()=>view(d)}>View</button></td></tr>)}{!devices.length&&<tr><td colSpan={4}>Chưa có thiết bị.</td></tr>)}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={close}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
