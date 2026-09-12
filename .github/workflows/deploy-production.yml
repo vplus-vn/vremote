@@ -78,7 +78,13 @@ jobs:
         run: composer config --global github-oauth.github.com "$COMPOSER_TOKEN"
       - name: Install backend dependencies (production)
         working-directory: backend
-        run: composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
+        # Self-healing: prefer the committed lock (reproducible). If it is stale or was
+        # generated on a different PHP (the lock must satisfy this runner's PHP 8.3, and
+        # composer.json pins platform.php=8.3.33), fall back to a fresh resolve so the
+        # deploy is never blocked by a lock drift.
+        run: |
+          composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader \
+            || composer update --no-interaction --prefer-dist --no-dev --optimize-autoloader
 
       # ---- Build console (static SPA) ----
       - uses: actions/setup-node@v4

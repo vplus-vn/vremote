@@ -25,7 +25,7 @@
   "autoload": {"psr-4": {"App\\": "app/"}},
   "autoload-dev": {"psr-4": {"Tests\\": "tests/"}},
   "scripts": {"test": "php artisan test", "lint": "vendor/bin/pint --test"},
-  "config": {"allow-plugins": {"wikimedia/composer-merge-plugin": true}},
+  "config": {"allow-plugins": {"wikimedia/composer-merge-plugin": true}, "platform": {"php": "8.3.33"}},
   "minimum-stability": "dev",
   "prefer-stable": true
 }
