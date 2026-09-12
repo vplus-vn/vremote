@@ -86,8 +86,9 @@ App secrets (session/signaling/TURN secrets, DB password, VPlus keys) live **onl
 6. systemd: install `deploy/systemd/vremote-signaling.service`, then `sudo systemctl enable --now vremote-signaling`.
 7. Grant the deploy user NOPASSWD sudo for exactly the reload commands used by the workflow:
    ```
-   # /etc/sudoers.d/vremote-deploy
-   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart vremote-signaling, \
+   # /etc/sudoers.d/vremote-deploy  (deploy user = vdeploy; the workflow defaults to it,
+   # override via the SERVER_PROD_USER repo Variable if different)
+   vdeploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart vremote-signaling, \
      /usr/bin/systemctl reload php8.3-fpm, /usr/bin/systemctl restart php8.3-fpm, \
      /usr/bin/systemctl reload nginx
    ```

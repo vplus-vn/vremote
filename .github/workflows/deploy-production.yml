@@ -17,7 +17,7 @@ concurrency:
 env:
   # Non-secret deploy targets. Override via repo Variables if the server differs.
   DEPLOY_HOST: ${{ vars.SERVER_PROD_HOST || 'vremote.vplus.vn' }}
-  DEPLOY_USER: ${{ vars.SERVER_PROD_USER || 'deploy' }}
+  DEPLOY_USER: ${{ vars.SERVER_PROD_USER || 'vdeploy' }}
   DEPLOY_PORT: ${{ vars.SERVER_PROD_PORT || '22022' }}
   DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/var/www/vremote.vplus.vn' }}
 
