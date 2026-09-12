@@ -11,8 +11,13 @@ const TOKEN_KEY='vremote_token';
 // VRemote's own origin (POST /api/vremote/v1/auth/login proxies to the Platform), stores the
 // issued token, and sends it as Bearer on every API call. The backend resolves identity via
 // the Platform (introspection), so this works with opaque Platform tokens.
-function readToken():string{try{return localStorage.getItem(TOKEN_KEY)??''}catch{return ''}}
-function writeToken(t:string){try{t?localStorage.setItem(TOKEN_KEY,t):localStorage.removeItem(TOKEN_KEY)}catch{/* ignore */}}
+function readToken():string{try{return localStorage.getItem(TOKEN_KEY)??sessionStorage.getItem(TOKEN_KEY)??''}catch{return ''}}
+// remember=true -> persist across browser restarts (localStorage); false -> this session only.
+function writeToken(t:string,remember=true){try{
+ if(!t){localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);return;}
+ if(remember){localStorage.setItem(TOKEN_KEY,t);sessionStorage.removeItem(TOKEN_KEY);}
+ else{sessionStorage.setItem(TOKEN_KEY,t);localStorage.removeItem(TOKEN_KEY);}
+}catch{/* ignore */}}
 // The Platform login response shape varies; pull the token from the usual places.
 function extractToken(x:any):string{
  if(!x||typeof x!=='object')return '';
@@ -22,6 +27,7 @@ function extractToken(x:any):string{
 
 function Login({onToken}:{onToken:(t:string)=>void}){
  const [username,setUsername]=React.useState(''); const [password,setPassword]=React.useState('');
+ const [showPw,setShowPw]=React.useState(false); const [remember,setRemember]=React.useState(true);
  const [busy,setBusy]=React.useState(false); const [error,setError]=React.useState('');
  async function submit(e:React.FormEvent){e.preventDefault(); setBusy(true); setError('');
   try{
@@ -30,7 +36,7 @@ function Login({onToken}:{onToken:(t:string)=>void}){
    if(!r.ok){setError(body?.error?.message??body?.message??`Đăng nhập thất bại (HTTP ${r.status})`); return;}
    const token=extractToken(body);
    if(!token){setError('Đăng nhập OK nhưng không tìm thấy token trong phản hồi. Field nhận được: '+Object.keys(body?.data??body??{}).join(', ')); return;}
-   writeToken(token); onToken(token);
+   writeToken(token,remember); onToken(token);
   }catch(err){setError(err instanceof Error?err.message:String(err));}
   finally{setBusy(false);}
  }
@@ -38,7 +44,13 @@ function Login({onToken}:{onToken:(t:string)=>void}){
    <h1>VRemote</h1><span className="sub">Remote Edge Monitor</span>
    {error&&<div className="error">{error}</div>}
    <label>Tài khoản<input value={username} onChange={e=>setUsername(e.target.value)} autoFocus autoComplete="username" placeholder="email / tài khoản platform"/></label>
-   <label>Mật khẩu<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password"/></label>
+   <label>Mật khẩu
+    <div className="pw-field">
+     <input type={showPw?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password"/>
+     <button type="button" className="pw-toggle" onClick={()=>setShowPw(v=>!v)} aria-label={showPw?'Ẩn mật khẩu':'Hiện mật khẩu'} title={showPw?'Ẩn mật khẩu':'Hiện mật khẩu'}>{showPw?'🙈':'👁️'}</button>
+    </div>
+   </label>
+   <label className="remember"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Ghi nhớ đăng nhập</label>
    <button type="submit" disabled={busy||!username||!password}>{busy?'Đang đăng nhập…':'Đăng nhập'}</button>
    <p className="hint">Đăng nhập bằng tài khoản VPlus Platform.</p>
  </form></main>;

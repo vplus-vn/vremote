@@ -12,3 +12,8 @@
 .login-card button{padding:10px 12px;background:#2563eb;color:#fff;border-color:#2563eb;font-size:15px}
 .login-card button:disabled{opacity:.55}
 .login-card .hint{margin:0;color:#9ca3af;font-size:13px;text-align:center}
+.pw-field{position:relative;display:flex;align-items:center}
+.pw-field input{flex:1;padding-right:42px;width:100%;box-sizing:border-box}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;padding:4px 6px;cursor:pointer;font-size:17px;line-height:1}
+.login-card label.remember{flex-direction:row;align-items:center;gap:8px;color:#374151;cursor:pointer}
+.login-card label.remember input{width:auto;margin:0}
