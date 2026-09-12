@@ -193,6 +193,11 @@ jobs:
           php artisan optimize:clear
           # NOTE: config:cache is intentionally NOT run yet — request-path env() reads
           # (VPlus keys) must move to config first (DSG-VREMOTE-002 §4). Enable later.
+          # php-fpm (www-data) writes the package manifest into this release's bootstrap/cache
+          # on first request; the rsync'd dir is owned by the deploy user, so make it writable
+          # by the fpm user and pre-warm it so the first web request only needs to read.
+          chmod -R 0777 bootstrap/cache
+          php artisan package:discover --ansi || true
 
           # Atomic flip.
           ln -sfn "\$REL" "\$ROOT/current"
