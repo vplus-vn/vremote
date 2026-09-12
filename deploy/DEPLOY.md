@@ -97,7 +97,7 @@ App secrets (session/signaling/TURN secrets, DB password, VPlus keys) live **onl
 
 1. Merge to `main`.
 2. Actions → **Deploy Production** → *Run workflow* → branch `main` → `confirm = deploy`.
-3. The workflow builds backend/console/signaling, uploads a new release, links shared state, runs `migrate --force`, flips `current`, restarts signaling, reloads php-fpm + nginx, and checks `GET /api/vremote/health` returns `200`.
+3. The workflow builds backend/console/signaling **and the Android agent APK** (parallel `build-agent` job), uploads a new release, publishes the APK to `shared/downloads/vremote-agent.apk`, links shared state, runs `migrate --force`, flips `current`, restarts signaling, reloads php-fpm + nginx, and checks `GET /api/vremote/health` returns `200`. The agent build is tolerant: if it fails, the rest of the release still ships and the previous APK stays in place.
 
 Rollback: point `current` at the previous release and reload:
 ```bash
@@ -109,4 +109,5 @@ sudo systemctl restart vremote-signaling && sudo systemctl reload php8.3-fpm ngi
 
 - `config:cache` is deliberately **not** enabled yet: request-path `env()` reads (VPlus keys, TURN secret) must move into config first — DSG-VREMOTE-002 §4. The deploy runs `optimize:clear`.
 - `php artisan migrate` is a no-op until the v0.2.0 MongoDB migrations land; the step is tolerant (`|| true`) meanwhile.
-- Android agent WSS: `wss://vremote.vplus.vn/agent`. Place the signed APK at `shared/downloads/vremote-agent.apk`.
+- Android agent WSS: `wss://vremote.vplus.vn/agent`. The deploy workflow builds and publishes the APK to `shared/downloads/vremote-agent.apk` automatically; the console "Download Android Agent" link (`/downloads/vremote-agent.apk`) then works. The build is **debug-signed** (sideloadable for internal fleet use). To ship a Play/enterprise release-signed APK, add a keystore secret and a `signingConfigs { release }` block to `agent-android/app/build.gradle.kts`, and switch the `build-agent` job to `assembleRelease`.
+- Signaling device auth (`signaling/.env.example` `VREMOTE_DEVICES_JSON`) is still the transitional map: a real enrolled device's `deviceToken` (issued at enrollment consume, stored in the Mongo `devices` collection) must be present there for the agent WebSocket to authenticate until the signaling service sources tokens from the shared registry. The demo device keeps working via the env map.

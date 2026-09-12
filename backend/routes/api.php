@@ -9,7 +9,7 @@ Route::get('/vremote/health',static fn()=>response()->json(['status'=>'ok','serv
 Route::post('/vremote/v1/auth/login',[AuthController::class,'login']);
 Route::get('/vremote/v1/auth/me',[AuthController::class,'me'])->middleware('vremote.platform');
 Route::prefix('vremote/v1')->middleware('vremote.platform')->group(function (): void {
- Route::get('/devices',[DeviceController::class,'index']);Route::get('/devices/{deviceId}',[DeviceController::class,'show']);
+ Route::get('/devices',[DeviceController::class,'index']);Route::post('/devices',[DeviceController::class,'store']);Route::get('/devices/{deviceId}',[DeviceController::class,'show']);
  Route::post('/sessions',[SessionController::class,'store']);Route::delete('/sessions/{sessionId}',[SessionController::class,'destroy']);
  Route::post('/devices/{deviceId}/commands',[CommandController::class,'store']);Route::get('/audit',[AuditController::class,'index']);Route::post('/integrations/sessions',[IntegrationController::class,'store']);
 });

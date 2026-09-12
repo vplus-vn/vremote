@@ -17,3 +17,26 @@
 .pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;padding:4px 6px;cursor:pointer;font-size:17px;line-height:1}
 .login-card label.remember{flex-direction:row;align-items:center;gap:8px;color:#374151;cursor:pointer}
 .login-card label.remember input{width:auto;margin:0}
+
+/* Device registration + enrollment */
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}
+.section-head h2{margin:0}
+.section-actions{display:flex;gap:8px}
+button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+button.ghost{background:#f3f4f6;color:#374151}
+.row-actions{display:flex;gap:8px}
+.reg-form{border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:16px;background:#fafbfc}
+.reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.reg-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#374151}
+.reg-form input{padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
+.reg-actions{display:flex;gap:8px;margin-top:14px}
+.reg-actions button[type=submit]{background:#2563eb;color:#fff;border-color:#2563eb}
+.enroll-box{border:1px solid #bfdbfe;border-radius:10px;padding:16px;margin-bottom:16px;background:#eff6ff}
+.enroll-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.enroll-head h3{margin:0;font-size:16px}
+.enroll-box .hint{color:#475569;font-size:13px;margin:6px 0 12px}
+.enroll-fields{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0}
+.enroll-fields dt{color:#6b7280;font-size:13px}
+.enroll-fields dd{margin:0}
+.enroll-fields code{background:#fff;border:1px solid #dbeafe;border-radius:6px;padding:2px 8px;font-size:13px}
+.enroll-fields code.wrap{display:inline-block;max-width:100%;overflow-wrap:anywhere}

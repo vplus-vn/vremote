@@ -2,7 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
-type Device={deviceId:string;machineCode?:string|null;name?:string|null;status:string};
+type Device={deviceId:string;machineCode?:string|null;name?:string|null;status:string;enrollmentState?:string|null};
+type Enroll={enrollmentId:string;code:string;token:string;expiresAt:number;qrUri:string;deviceId:string};
 type Grant={sessionId:string;capability:string;signalingUrl:string;sessionToken:string;iceServers:RTCIceServer[];ttlSec:number};
 const agentDownloadUrl=import.meta.env.VITE_AGENT_DOWNLOAD_URL??'/downloads/vremote-agent.apk';
 const TOKEN_KEY='vremote_token';
@@ -56,9 +57,38 @@ function Login({onToken}:{onToken:(t:string)=>void}){
  </form></main>;
 }
 
+// Server-side device onboarding: an admin creates the device row here, then the agent
+// completes enrollment on the box using the one-time code below.
+function RegisterForm({onSubmit,onCancel}:{onSubmit:(machineCode:string,name:string,deviceId:string,tenantId:string)=>void;onCancel:()=>void}){
+ const [machineCode,setMachineCode]=React.useState(''); const [name,setName]=React.useState(''); const [deviceId,setDeviceId]=React.useState(''); const [tenantId,setTenantId]=React.useState('');
+ return <form className="reg-form" onSubmit={e=>{e.preventDefault(); onSubmit(machineCode.trim(),name.trim(),deviceId.trim(),tenantId.trim());}}>
+   <div className="reg-grid">
+    <label>Machine code *<input value={machineCode} onChange={e=>setMachineCode(e.target.value)} autoFocus placeholder="mã máy / serial thiết bị"/></label>
+    <label>Tên<input value={name} onChange={e=>setName(e.target.value)} placeholder="tên hiển thị (tuỳ chọn)"/></label>
+    <label>Device ID<input value={deviceId} onChange={e=>setDeviceId(e.target.value)} placeholder="để trống = tự sinh"/></label>
+    <label>Tenant ID<input value={tenantId} onChange={e=>setTenantId(e.target.value)} placeholder="để trống = tenant của bạn"/></label>
+   </div>
+   <div className="reg-actions"><button type="submit" disabled={!machineCode.trim()}>Đăng ký &amp; tạo mã</button><button type="button" className="ghost" onClick={onCancel}>Huỷ</button></div>
+ </form>;
+}
+
+function EnrollBox({enroll,onClose}:{enroll:Enroll;onClose:()=>void}){
+ const expires=new Date(enroll.expiresAt*1000).toLocaleString();
+ return <div className="enroll-box"><div className="enroll-head"><h3>Mã ghi danh — {enroll.deviceId}</h3><button className="ghost" onClick={onClose}>Đóng</button></div>
+   <p className="hint">Nhập mã này trên app VRemote Agent của thiết bị. Chỉ hiển thị một lần, hết hạn lúc {expires}.</p>
+   <dl className="enroll-fields">
+    <dt>Enrollment ID</dt><dd><code>{enroll.enrollmentId}</code></dd>
+    <dt>Code</dt><dd><code>{enroll.code}</code></dd>
+    <dt>Token</dt><dd><code className="wrap">{enroll.token}</code></dd>
+    <dt>QR URI</dt><dd><code className="wrap">{enroll.qrUri}</code></dd>
+   </dl>
+ </div>;
+}
+
 function App(){
  const [token,setToken]=React.useState<string>(readToken());
  const [devices,setDevices]=React.useState<Device[]>([]); const [error,setError]=React.useState(''); const [grant,setGrant]=React.useState<Grant|null>(null);
+ const [showReg,setShowReg]=React.useState(false); const [enroll,setEnroll]=React.useState<Enroll|null>(null);
  const video=React.useRef<HTMLVideoElement>(null); const pc=React.useRef<RTCPeerConnection|null>(null); const ws=React.useRef<WebSocket|null>(null);
 
  const authedFetch=React.useCallback(async(input:string,init?:RequestInit)=>{
@@ -68,11 +98,33 @@ function App(){
   return r;
  },[token]);
 
- function logout(){close(); writeToken(''); setToken(''); setDevices([]);}
+ const refresh=React.useCallback(async()=>{
+  try{const r=await authedFetch('/api/vremote/v1/devices'); if(!r.ok)throw Error(`HTTP ${r.status}`); const x=await r.json(); setDevices(x.items??[]);}
+  catch(e){setError(e instanceof Error?e.message:String(e));}
+ },[authedFetch]);
+
+ function logout(){close(); writeToken(''); setToken(''); setDevices([]); setShowReg(false); setEnroll(null);}
+
+ // Register a device from the server, then immediately mint its first enroll code.
+ async function registerDevice(machineCode:string,name:string,deviceId:string,tenantId:string){setError('');
+  try{
+   const body:Record<string,string>={machineCode}; if(name)body.name=name; if(deviceId)body.deviceId=deviceId; if(tenantId)body.tenantId=tenantId;
+   const r=await authedFetch('/api/vremote/v1/devices',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   setShowReg(false); await refresh(); await genEnroll(String(d.deviceId));
+  }catch(e){setError(e instanceof Error?e.message:String(e));}
+ }
+ // Generate a one-time enrollment code+token for the agent (manual method).
+ async function genEnroll(deviceId:string){setError('');
+  try{
+   const r=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}/enrollments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'manual'})});
+   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   setEnroll({...d,deviceId});
+  }catch(e){setError(e instanceof Error?e.message:String(e));}
+ }
 
  React.useEffect(()=>{if(!token)return;
-  authedFetch('/api/vremote/v1/devices').then(async r=>{if(!r.ok)throw Error(`HTTP ${r.status}`);return r.json()})
-   .then(x=>setDevices(x.items??[])).catch(e=>setError(e instanceof Error?e.message:String(e)));
+  void refresh();
   return ()=>close();
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[token]);
@@ -89,6 +141,6 @@ function App(){
 
  if(!token)return <Login onToken={t=>{setError(''); setToken(t);}}/>;
 
- return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><h2>Devices</h2><table><thead><tr><th>Device</th><th>Machine</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.status}</td><td><button disabled={d.status!=='online'} onClick={()=>void view(d)}>View</button></td></tr>)}{!devices.length&&<tr><td colSpan={4}>Chưa có thiết bị.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>;
+ return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><div className="section-head"><h2>Devices</h2><div className="section-actions"><button onClick={()=>void refresh()}>Tải lại</button><button className="primary" onClick={()=>{setEnroll(null); setShowReg(v=>!v);}}>{showReg?'Đóng':'+ Đăng ký thiết bị'}</button></div></div>{showReg&&<RegisterForm onSubmit={registerDevice} onCancel={()=>setShowReg(false)}/>}{enroll&&<EnrollBox enroll={enroll} onClose={()=>setEnroll(null)}/>}<table><thead><tr><th>Device</th><th>Machine</th><th>Enrollment</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.enrollmentState??'—'}</td><td>{d.status}</td><td className="row-actions"><button disabled={d.status!=='online'} onClick={()=>void view(d)}>View</button>{d.enrollmentState!=='ACTIVE'&&<button className="ghost" onClick={()=>void genEnroll(d.deviceId)}>Mã ghi danh</button>}</td></tr>)}{!devices.length&&<tr><td colSpan={5}>Chưa có thiết bị. Bấm “+ Đăng ký thiết bị” để thêm.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
