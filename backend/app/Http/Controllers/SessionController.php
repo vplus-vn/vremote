@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 namespace App\Http\Controllers;
-use App\Application\Authorization\AuthorizationService;use App\Domain\Platform\PlatformContext;use App\Services\AuditStore;use App\Services\DeviceRegistry;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
+use App\Application\Authorization\AuthorizationService;use App\Domain\Contracts\DeviceRepository;use App\Domain\Platform\PlatformContext;use App\Services\AuditStore;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
 final class SessionController {
- public function store(Request $request,DeviceRegistry $registry,SessionStore $store,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit,AuthorizationService $authz):JsonResponse{
+ public function store(Request $request,DeviceRepository $registry,SessionStore $store,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit,AuthorizationService $authz):JsonResponse{
   $data=$request->validate(['deviceId'=>['required','string','max:128'],'capability'=>['required','in:view,control'],'preferredMaxFps'=>['nullable','integer','min:1','max:60']]);$perm=$data['capability']==='view'?'edge.admin.view':'edge.admin.control';
   if(($resp=$this->authorizeDevice($request,$authz,$data['deviceId'],$perm))!==null)return $resp;
   $device=$registry->get($data['deviceId']);if(!$device)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'Device not found']],404);if(($device['status']??'offline')!=='online')return response()->json(['error'=>['code'=>'DEVICE_OFFLINE','message'=>'Device is offline']],503);if(empty($device['deviceToken']))return response()->json(['error'=>['code'=>'DEVICE_NOT_PROVISIONED','message'=>'Device signing key unavailable']],503);

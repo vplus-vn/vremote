@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 namespace App\Http\Controllers;
-use App\Services\AuditStore;use App\Services\DeviceRegistry;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
+use App\Domain\Contracts\DeviceRepository;use App\Services\AuditStore;use App\Services\SessionStore;use App\Services\SessionTokenService;use App\Services\TurnCredentialService;use App\Services\VRemoteSigningService;use Illuminate\Http\JsonResponse;use Illuminate\Http\Request;use Illuminate\Support\Facades\Http;use Illuminate\Support\Str;
 final class IntegrationController{
- public function store(Request $r,DeviceRegistry $registry,SessionStore $sessions,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit):JsonResponse{
+ public function store(Request $r,DeviceRepository $registry,SessionStore $sessions,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit):JsonResponse{
   $d=$r->validate(['machineCode'=>['nullable','string','max:128'],'deviceId'=>['nullable','string','max:128'],'capability'=>['required','in:view,control'],'productId'=>['nullable','string','max:64']]);
-  $deviceId=$d['deviceId']??null;if(!$deviceId&&isset($d['machineCode']))foreach($registry->all() as $id=>$device)if(($device['machineCode']??null)===$d['machineCode']){$deviceId=$id;break;}
+  $deviceId=$d['deviceId']??null;if(!$deviceId&&isset($d['machineCode'])){$m=$registry->findByMachineCode($d['machineCode']);if($m)$deviceId=(string)($m['deviceId']??'');}
   if(!$deviceId)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'machineCode/deviceId could not be mapped']],404);
   $device=$registry->get($deviceId);if(!$device)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'Device not found']],404);if(($device['status']??'offline')!=='online')return response()->json(['error'=>['code'=>'DEVICE_OFFLINE','message'=>'Device is offline']],503);
   $perm=$d['capability']==='view'?'edge.admin.view':'edge.admin.control';if(!in_array($perm,(array)$r->attributes->get('permissions',[]),true))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>$perm.' required']],403);
