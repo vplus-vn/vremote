@@ -210,8 +210,9 @@ jobs:
           sudo /usr/bin/systemctl reload php8.3-fpm || sudo /usr/bin/systemctl restart php8.3-fpm || echo "::warning::php8.3-fpm not reloaded (sudoers for $DEPLOY_USER?)"
           sudo /usr/bin/systemctl reload nginx || echo "::warning::nginx not reloaded (sudoers for $DEPLOY_USER?)"
 
-          # Keep the last 5 releases.
-          cd "\$ROOT/releases" && ls -1dt */ | tail -n +6 | xargs -r rm -rf
+          # Keep the last 5 releases. Best-effort: never fail the deploy on leftover
+          # root-owned files from older manual releases the deploy user can't remove.
+          cd "\$ROOT/releases" && ls -1dt */ | tail -n +6 | xargs -r rm -rf 2>/dev/null || true
           EOF
 
       - name: Smoke check
