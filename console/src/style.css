@@ -40,3 +40,10 @@ button.ghost{background:#f3f4f6;color:#374151}
 .enroll-fields dd{margin:0}
 .enroll-fields code{background:#fff;border:1px solid #dbeafe;border-radius:6px;padding:2px 8px;font-size:13px}
 .enroll-fields code.wrap{display:inline-block;max-width:100%;overflow-wrap:anywhere}
+
+/* Connect by ID (control another machine) */
+.connect-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+.connect-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#374151}
+.connect-form input{padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-width:200px}
+.connect-form button{padding:9px 16px}
+section .hint{color:#6b7280;font-size:13px;margin:4px 0 12px}
