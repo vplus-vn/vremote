@@ -198,9 +198,12 @@ jobs:
           ln -sfn "\$REL" "\$ROOT/current"
 
           # Reload services (deploy user needs NOPASSWD sudo for exactly these).
-          sudo /usr/bin/systemctl restart vremote-signaling
-          sudo /usr/bin/systemctl reload php8.3-fpm || sudo /usr/bin/systemctl restart php8.3-fpm
-          sudo /usr/bin/systemctl reload nginx
+          # Best-effort: the atomic flip above already makes the new release live, so a
+          # missing signaling unit or not-yet-granted sudoers surfaces as a warning rather
+          # than failing the whole deploy (see DEPLOY.md §6 for the one-time bootstrap).
+          sudo /usr/bin/systemctl restart vremote-signaling || echo "::warning::vremote-signaling not restarted (unit installed? sudoers for $DEPLOY_USER? see DEPLOY.md §6)"
+          sudo /usr/bin/systemctl reload php8.3-fpm || sudo /usr/bin/systemctl restart php8.3-fpm || echo "::warning::php8.3-fpm not reloaded (sudoers for $DEPLOY_USER?)"
+          sudo /usr/bin/systemctl reload nginx || echo "::warning::nginx not reloaded (sudoers for $DEPLOY_USER?)"
 
           # Keep the last 5 releases.
           cd "\$ROOT/releases" && ls -1dt */ | tail -n +6 | xargs -r rm -rf
