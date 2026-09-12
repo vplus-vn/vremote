@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>VRemote Agent (Web)</title>
+<style>
+ :root{color-scheme:light;font-family:Inter,system-ui,sans-serif;color:#1f2937;background:#f5f7fa}
+ body{margin:0;padding:24px;max-width:640px;margin:0 auto}
+ h1{margin:0} .sub{color:#6b7280}
+ .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-top:16px}
+ .idrow{display:flex;gap:24px;flex-wrap:wrap}
+ .field{flex:1;min-width:160px} .field label{display:block;font-size:13px;color:#6b7280;margin-bottom:4px}
+ .big{font-size:28px;font-weight:700;letter-spacing:1px;font-variant-numeric:tabular-nums}
+ .pw{font-size:24px;font-weight:700;color:#2563eb;display:flex;align-items:center;gap:8px}
+ button{padding:9px 16px;border-radius:8px;border:1px solid #bbb;background:#fff;cursor:pointer;font-size:14px}
+ button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+ button.icon{padding:4px 8px;font-size:16px;line-height:1}
+ input[type=text],input[type=password]{padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;width:100%;box-sizing:border-box}
+ .row{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+ .status{margin-top:12px;padding:8px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:14px}
+ .status.err{background:#fff5f5;color:#991b1b}
+ .accept{margin-top:16px;padding:16px;border:1px solid #fcd34d;border-radius:10px;background:#fffbeb}
+ .accept .row{margin-top:12px}
+ .muted{color:#9ca3af;font-size:12px;margin-top:8px}
+ [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<h1>VRemote Agent</h1><div class="sub">Chia sẻ màn hình máy này (Windows / Linux / macOS)</div>
+
+<div class="card">
+ <div class="idrow">
+  <div class="field"><label>ID của bạn</label><div class="big" id="pairingId">…</div></div>
+  <div class="field"><label>Mật khẩu (phiên)</label><div class="pw"><span id="sessionPw">…</span><button class="icon" id="refreshPw" title="Đổi mật khẩu">↻</button></div></div>
+ </div>
+ <div class="row">
+  <button class="primary" id="startBtn">Bắt đầu chia sẻ màn hình</button>
+  <button id="stopBtn" hidden>Dừng chia sẻ</button>
+ </div>
+ <div class="status" id="status">Chưa chia sẻ. Bấm “Bắt đầu chia sẻ màn hình”.</div>
+ <div class="accept" id="acceptBox" hidden>
+  <b id="acceptText">Có yêu cầu kết nối.</b>
+  <div class="row"><button class="primary" id="acceptYes">Đồng ý</button><button id="acceptNo">Từ chối</button></div>
+ </div>
+</div>
+
+<div class="card">
+ <b>Truy cập mọi lúc (unattended)</b>
+ <div class="row"><label style="min-width:120px">Mật khẩu riêng</label><input type="password" id="personalPw" placeholder="đặt để lần sau vào thẳng"/><button id="savePersonal">Lưu</button></div>
+ <div class="row"><label><input type="checkbox" id="requireAccept"/> Bắt buộc hỏi “Đồng ý” trên máy này khi có người kết nối</label></div>
+ <div class="muted">Mật khẩu chỉ lưu trên máy này; máy chủ chỉ nhận bản băm (hash).</div>
+</div>
+
+<script>
+const API='/api/vremote/v1';
+const $=id=>document.getElementById(id);
+const LS=window.localStorage;
+function setStatus(t,err){const s=$('status');s.textContent=t;s.className='status'+(err?' err':'');}
+
+// Stable per-browser machine code + persisted settings.
+function machineCode(){let m=LS.getItem('vremote.machineCode');if(!m){m='web-'+(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));LS.setItem('vremote.machineCode',m)}return m;}
+function personalPw(){return LS.getItem('vremote.personalPw')||''}
+function requireAccept(){return LS.getItem('vremote.requireAccept')!=='false'}
+function randomPw(n=6){const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';const r=crypto.getRandomValues(new Uint32Array(n));for(let i=0;i<n;i++)s+=a[r[i]%a.length];return s;}
+async function sha256hex(str){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function fmtId(id){return String(id).replace(/(\d{3})(?=\d)/g,'$1 ').trim();}
+
+let sessionPw=randomPw();
+let state={deviceId:LS.getItem('vremote.deviceId')||'',deviceToken:LS.getItem('vremote.deviceToken')||'',pairingId:''};
+let stream=null,ws=null,pollTimer=null,pendingReq=null;
+const peers=new Map(); // sessionId -> RTCPeerConnection
+const ICE=[{urls:'stun:stun.l.google.com:19302'}];
+
+async function announce(){
+ const body={machineCode:machineCode(),agentVersion:'web-0.2.0',platform:'web',
+   sessionPasswordHash:await sha256hex(sessionPw),requireAccept:requireAccept()};
+ const pp=personalPw(); body.personalPasswordHash=pp?await sha256hex(pp):'';
+ const r=await fetch(API+'/agent/announce',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ const d=await r.json().catch(()=>({})); if(!r.ok)throw new Error(d?.error?.message||('HTTP '+r.status));
+ state.deviceId=d.deviceId; state.deviceToken=d.deviceToken; state.pairingId=d.pairingId;
+ LS.setItem('vremote.deviceId',d.deviceId); LS.setItem('vremote.deviceToken',d.deviceToken);
+ $('pairingId').textContent=fmtId(d.pairingId); $('sessionPw').textContent=sessionPw;
+}
+
+async function startShare(){
+ try{
+  stream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:false});
+  stream.getVideoTracks()[0].addEventListener('ended',stopShare);
+  await announce();
+  connectWs(); startPolling();
+  $('startBtn').hidden=true; $('stopBtn').hidden=false;
+  setStatus('Đang chia sẻ. Chờ kết nối bằng ID + mật khẩu ở trên.');
+ }catch(e){setStatus('Không lấy được màn hình: '+(e&&e.message||e),true);}
+}
+function stopShare(){
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ if(ws){try{ws.close()}catch(e){}ws=null}
+ if(pollTimer){clearInterval(pollTimer);pollTimer=null}
+ for(const p of peers.values())try{p.close()}catch(e){} peers.clear();
+ $('startBtn').hidden=false; $('stopBtn').hidden=true; hideAccept();
+ setStatus('Đã dừng chia sẻ.');
+}
+
+function connectWs(){
+ ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/agent');
+ ws.onopen=()=>{ws.send(JSON.stringify({type:'agent.auth',deviceId:state.deviceId,deviceToken:state.deviceToken}));};
+ ws.onclose=()=>{if(stream)setStatus('Mất kết nối signaling — đang thử lại…',true);setTimeout(()=>{if(stream)connectWs()},4000);};
+ ws.onmessage=async ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
+  if(m.type==='agent.authenticated'){ws.send(JSON.stringify({type:'agent.hello',deviceId:state.deviceId,agentVersion:'web-0.2.0',platform:'web'}));setStatus('Sẵn sàng — đã kết nối signaling.');return}
+  if(m.type==='agent.signaling'&&m.payload){await onViewerSignal(m.sessionId,m.payload);return}
+  // session.enable arrives on this authenticated channel; we already hold the capture, nothing to do.
+ };
+}
+async function onViewerSignal(sessionId,p){
+ if(p.type==='offer'){
+  const pc=new RTCPeerConnection({iceServers:ICE}); peers.set(sessionId,pc);
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  pc.onicecandidate=e=>{if(e.candidate&&ws&&ws.readyState===1)ws.send(JSON.stringify({type:'agent.signaling',sessionId,payload:{type:'candidate',sessionId,candidate:e.candidate.toJSON()}}));};
+  pc.onconnectionstatechange=()=>{if(['closed','failed','disconnected'].includes(pc.connectionState)){pc.close();peers.delete(sessionId)}};
+  await pc.setRemoteDescription({type:'offer',sdp:p.sdp});
+  const ans=await pc.createAnswer(); await pc.setLocalDescription(ans);
+  ws.send(JSON.stringify({type:'agent.signaling',sessionId,payload:{type:'answer',sessionId,sdp:ans.sdp}}));
+  setStatus('Đang có người xem màn hình.');
+ }else if(p.type==='candidate'&&p.candidate){const pc=peers.get(sessionId);if(pc)await pc.addIceCandidate(p.candidate).catch(()=>{});}
+ else if(p.type==='leave'){const pc=peers.get(sessionId);if(pc){pc.close();peers.delete(sessionId)}}
+}
+
+function startPolling(){pollTimer=setInterval(pollPending,2000);}
+async function pollPending(){
+ if(!state.deviceId)return;
+ try{const r=await fetch(API+'/agent/'+encodeURIComponent(state.deviceId)+'/pending',{headers:{'X-Device-Token':state.deviceToken}});
+  const d=await r.json().catch(()=>({})); if(r.ok&&d.pending){showAccept(d.pending)} else if(!d.pending&&pendingReq){hideAccept()}
+ }catch(e){}
+}
+function showAccept(p){if(pendingReq&&pendingReq.requestId===p.requestId)return;pendingReq=p;$('acceptText').textContent='“'+(p.actor||'operator')+'” muốn kết nối vào máy này.';$('acceptBox').hidden=false;}
+function hideAccept(){pendingReq=null;$('acceptBox').hidden=true;}
+async function respond(accept){if(!pendingReq)return;const req=pendingReq.requestId;hideAccept();
+ try{await fetch(API+'/agent/'+encodeURIComponent(state.deviceId)+'/respond',{method:'POST',headers:{'content-type':'application/json','X-Device-Token':state.deviceToken},body:JSON.stringify({requestId:req,accept})});}catch(e){}
+}
+
+// wire up
+$('startBtn').onclick=startShare;
+$('stopBtn').onclick=stopShare;
+$('refreshPw').onclick=async()=>{sessionPw=randomPw();$('sessionPw').textContent=sessionPw;if(stream){try{await announce()}catch(e){setStatus(String(e),true)}}};
+$('acceptYes').onclick=()=>respond(true);
+$('acceptNo').onclick=()=>respond(false);
+$('personalPw').value=personalPw();
+$('requireAccept').checked=requireAccept();
+$('savePersonal').onclick=async()=>{LS.setItem('vremote.personalPw',$('personalPw').value);if(stream){try{await announce()}catch(e){}}setStatus('Đã lưu mật khẩu riêng.');};
+$('requireAccept').onchange=async()=>{LS.setItem('vremote.requireAccept',$('requireAccept').checked?'true':'false');if(stream){try{await announce()}catch(e){}}};
+$('sessionPw').textContent=sessionPw;
+setStatus('Chưa chia sẻ. Bấm “Bắt đầu chia sẻ màn hình”.');
+</script>
+</body>
+</html>
