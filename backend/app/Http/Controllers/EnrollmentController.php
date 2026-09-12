@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Application\Enrollment\EnrollmentException;
 use App\Application\Enrollment\EnrollmentService;
+use App\Domain\Contracts\DeviceRepository;
 use App\Domain\Platform\PlatformContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,7 @@ use Illuminate\Http\Request;
  */
 final class EnrollmentController
 {
-    public function store(Request $request, string $deviceId, EnrollmentService $service): JsonResponse
+    public function store(Request $request, string $deviceId, EnrollmentService $service, DeviceRepository $devices): JsonResponse
     {
         if (($resp = $this->requirePermission($request, 'edge.admin.control')) !== null) {
             return $resp;
@@ -27,8 +28,12 @@ final class EnrollmentController
             'ttlSec' => ['nullable', 'integer', 'min:60', 'max:3600'],
         ]);
 
+        // Resolve the tenant: explicit request value, else the device's own tenant (an
+        // enrolled/registered device already carries ownerTenantId), else the caller's
+        // tenant — so a full-access admin with no tenant of their own still works.
         $ctx = $this->context($request);
-        $tenantId = $data['tenantId'] ?? $ctx?->tenantId;
+        $device = $devices->get($deviceId);
+        $tenantId = $data['tenantId'] ?? ($device['ownerTenantId'] ?? null) ?? $ctx?->tenantId;
         if (! $tenantId) {
             return $this->error('INVALID_ARGUMENT', 'tenantId is required', 422);
         }

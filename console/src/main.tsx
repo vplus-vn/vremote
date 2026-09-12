@@ -59,13 +59,14 @@ function Login({onToken}:{onToken:(t:string)=>void}){
 
 // Server-side device onboarding: an admin creates the device row here, then the agent
 // completes enrollment on the box using the one-time code below.
-function RegisterForm({onSubmit,onCancel}:{onSubmit:(machineCode:string,name:string,deviceId:string)=>void;onCancel:()=>void}){
- const [machineCode,setMachineCode]=React.useState(''); const [name,setName]=React.useState(''); const [deviceId,setDeviceId]=React.useState('');
- return <form className="reg-form" onSubmit={e=>{e.preventDefault(); onSubmit(machineCode.trim(),name.trim(),deviceId.trim());}}>
+function RegisterForm({onSubmit,onCancel}:{onSubmit:(machineCode:string,name:string,deviceId:string,tenantId:string)=>void;onCancel:()=>void}){
+ const [machineCode,setMachineCode]=React.useState(''); const [name,setName]=React.useState(''); const [deviceId,setDeviceId]=React.useState(''); const [tenantId,setTenantId]=React.useState('');
+ return <form className="reg-form" onSubmit={e=>{e.preventDefault(); onSubmit(machineCode.trim(),name.trim(),deviceId.trim(),tenantId.trim());}}>
    <div className="reg-grid">
     <label>Machine code *<input value={machineCode} onChange={e=>setMachineCode(e.target.value)} autoFocus placeholder="mã máy / serial thiết bị"/></label>
     <label>Tên<input value={name} onChange={e=>setName(e.target.value)} placeholder="tên hiển thị (tuỳ chọn)"/></label>
     <label>Device ID<input value={deviceId} onChange={e=>setDeviceId(e.target.value)} placeholder="để trống = tự sinh"/></label>
+    <label>Tenant ID<input value={tenantId} onChange={e=>setTenantId(e.target.value)} placeholder="để trống = tenant của bạn"/></label>
    </div>
    <div className="reg-actions"><button type="submit" disabled={!machineCode.trim()}>Đăng ký &amp; tạo mã</button><button type="button" className="ghost" onClick={onCancel}>Huỷ</button></div>
  </form>;
@@ -105,9 +106,9 @@ function App(){
  function logout(){close(); writeToken(''); setToken(''); setDevices([]); setShowReg(false); setEnroll(null);}
 
  // Register a device from the server, then immediately mint its first enroll code.
- async function registerDevice(machineCode:string,name:string,deviceId:string){setError('');
+ async function registerDevice(machineCode:string,name:string,deviceId:string,tenantId:string){setError('');
   try{
-   const body:Record<string,string>={machineCode}; if(name)body.name=name; if(deviceId)body.deviceId=deviceId;
+   const body:Record<string,string>={machineCode}; if(name)body.name=name; if(deviceId)body.deviceId=deviceId; if(tenantId)body.tenantId=tenantId;
    const r=await authedFetch('/api/vremote/v1/devices',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
    const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
    setShowReg(false); await refresh(); await genEnroll(String(d.deviceId));
