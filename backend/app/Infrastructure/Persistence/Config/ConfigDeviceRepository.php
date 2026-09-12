@@ -41,6 +41,17 @@ final class ConfigDeviceRepository implements DeviceRepository
         return null;
     }
 
+    public function findByPairingId(string $pairingId): ?array
+    {
+        foreach ($this->all() as $id => $d) {
+            if (is_array($d) && ($d['pairingId'] ?? null) === $pairingId) {
+                return $d + ['deviceId' => (string) $id];
+            }
+        }
+
+        return null;
+    }
+
     public function list(array $filters = [], int $limit = 50): array
     {
         $items = [];

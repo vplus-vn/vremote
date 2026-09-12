@@ -121,11 +121,13 @@ final class DeviceController
     {
         return [
             'deviceId' => (string) ($d['deviceId'] ?? ''),
+            'pairingId' => $d['pairingId'] ?? null,
             'machineCode' => $d['machineCode'] ?? null,
             'name' => $d['name'] ?? null,
             'platform' => $d['platform'] ?? 'android',
             'status' => $d['status'] ?? 'offline',
             'enrollmentState' => $d['enrollmentState'] ?? EnrollmentState::UNENROLLED,
+            'requireAccept' => (bool) ($d['requireAccept'] ?? true),
             'agentVersion' => $d['agentVersion'] ?? null,
             'lastSeenAt' => $d['lastSeenAt'] ?? null,
             'activeSessions' => $d['activeSessions'] ?? 0,

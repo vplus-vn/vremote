@@ -16,6 +16,9 @@ interface DeviceRepository
     /** @return array<string,mixed>|null */
     public function findByMachineCode(string $machineCode): ?array;
 
+    /** @return array<string,mixed>|null */
+    public function findByPairingId(string $pairingId): ?array;
+
     /**
      * @param array{status?:string,tenantId?:string} $filters
      * @return list<array<string,mixed>>

@@ -34,6 +34,13 @@ final class MongoDeviceRepository implements DeviceRepository
         return $doc ? $this->hydrate((array) $doc) : null;
     }
 
+    public function findByPairingId(string $pairingId): ?array
+    {
+        $doc = $this->table()->where('pairingId', $pairingId)->first();
+
+        return $doc ? $this->hydrate((array) $doc) : null;
+    }
+
     public function list(array $filters = [], int $limit = 50): array
     {
         $q = $this->table();
