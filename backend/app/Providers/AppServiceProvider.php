@@ -27,8 +27,8 @@ use App\Infrastructure\Persistence\Mongo\MongoNonceRepository;
 use App\Infrastructure\Persistence\Mongo\MongoRevokedSessionRepository;
 use App\Infrastructure\Platform\CoreLibPlatformClient;
 use App\Infrastructure\Platform\FakePlatformClient;
+use App\Infrastructure\Platform\CheckRefPlatformClient;
 use App\Infrastructure\Platform\HttpPlatformClient;
-use App\Infrastructure\Platform\IntrospectionPlatformClient;
 use App\Infrastructure\Platform\JwtPlatformClient;
 use App\Infrastructure\Platform\OidcPlatformClient;
 use App\Services\AuditStore;
@@ -87,9 +87,10 @@ final class AppServiceProvider extends ServiceProvider
             // tokens. Enabled by VREMOTE_PLATFORM_INTROSPECT with VREMOTE_PLATFORM_URL set.
             $platformUrlIntrospect = (string) config('vremote.platform_url', '');
             if ((bool) config('vremote.platform_introspect', false) && $platformUrlIntrospect !== '') {
-                return new IntrospectionPlatformClient(
+                // VPlus contract: exchange the opaque referenceToken for a JWT via checkRef.
+                return new CheckRefPlatformClient(
                     $platformUrlIntrospect,
-                    (string) config('vremote.platform_me_path', '/v1/me'),
+                    (string) config('vremote.platform_checkref_path', '/v1/auth/checkRef'),
                     (int) config('vremote.introspect_ttl', 30),
                 );
             }

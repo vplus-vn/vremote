@@ -29,7 +29,8 @@ final class PlatformContext
 
     public function hasPermission(string $permission): bool
     {
-        return in_array($permission, $this->permissions, true);
+        // "*" is the Platform wildcard (full access), e.g. an admin whose JWT carries perms:["*"].
+        return in_array('*', $this->permissions, true) || in_array($permission, $this->permissions, true);
     }
 
     public function hasScope(string $scope): bool
