@@ -22,8 +22,41 @@ env:
   DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/var/www/vremote.vplus.vn' }}
 
 jobs:
+  # Build the Android agent APK in parallel with the deploy. Tolerant: if the Android
+  # build fails (e.g. SDK hiccup), the deploy still ships backend/console/signaling and
+  # simply leaves the previous APK in place, rather than blocking the whole release.
+  build-agent:
+    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Assemble agent APK (debug-signed, sideloadable)
+        working-directory: agent-android
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Stage APK as vremote-agent.apk
+        run: cp agent-android/app/build/outputs/apk/debug/app-debug.apk vremote-agent.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vremote-agent-apk
+          path: vremote-agent.apk
+          if-no-files-found: error
+
   deploy:
     # Guard: only main, and only when the operator typed the confirmation word.
+    # Runs even if build-agent failed (it is continue-on-error); a missing APK artifact
+    # is handled best-effort in the "Publish agent APK" step below.
+    needs: build-agent
     if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.confirm == 'deploy' }}
     runs-on: ubuntu-latest
     environment: production
@@ -63,6 +96,15 @@ jobs:
           npm ci
           npm run build
           npm prune --omit=dev
+
+      # ---- Pull the agent APK built by build-agent (best-effort) ----
+      - name: Download agent APK artifact
+        id: apk
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: vremote-agent-apk
+          path: agent-apk
 
       # ---- Assemble the release directory ----
       - name: Assemble release
@@ -109,6 +151,20 @@ jobs:
           $SSH "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/releases/$TS' '$DEPLOY_PATH/shared/downloads' '$DEPLOY_PATH/shared/backend-storage'"
           rsync -az --delete -e "$SSH" release/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/releases/$TS/"
 
+      # ---- Publish the Android APK into shared/downloads (best-effort) ----
+      # nginx serves /downloads/ from shared/downloads (survives releases). Only replaces
+      # the live APK when build-agent produced one this run; otherwise leaves it untouched.
+      - name: Publish agent APK
+        run: |
+          set -euo pipefail
+          if [ -f agent-apk/vremote-agent.apk ]; then
+            SSH="ssh -p $DEPLOY_PORT -i ~/.ssh/id_deploy"
+            rsync -az -e "$SSH" agent-apk/vremote-agent.apk "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/vremote-agent.apk"
+            echo "Published vremote-agent.apk to shared/downloads."
+          else
+            echo "No APK artifact this run (build-agent skipped/failed); keeping existing download."
+          fi
+
       # ---- Activate the release on the server ----
       - name: Activate release
         run: |
@@ -147,6 +203,6 @@ jobs:
       - name: Smoke check
         run: |
           set -euo pipefail
-          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DEPLOY_HOST/api/health" || true)
-          echo "GET https://$DEPLOY_HOST/api/health -> $code"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DEPLOY_HOST/api/vremote/health" || true)
+          echo "GET https://$DEPLOY_HOST/api/vremote/health -> $code"
           test "$code" = "200" || { echo "Health check did not return 200"; exit 1; }
