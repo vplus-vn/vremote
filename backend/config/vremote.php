@@ -8,6 +8,9 @@ return [
     // to the Platform's "who am I" endpoint instead of verifying a JWT locally. Works with
     // OPAQUE Platform tokens. When on (and platform_url set) it is the primary PlatformClient.
     'platform_introspect' => filter_var(env('VREMOTE_PLATFORM_INTROSPECT', false), FILTER_VALIDATE_BOOL),
+    // VPlus contract: the login access_token is an opaque referenceToken; exchange it for a
+    // real JWT via checkRef (POST {url}{checkref_path} {referenceToken}).
+    'platform_checkref_path' => env('VREMOTE_PLATFORM_CHECKREF_PATH', '/v1/auth/checkRef'),
     'platform_me_path' => env('VREMOTE_PLATFORM_ME_PATH', '/v1/me'),
     'platform_login_path' => env('VREMOTE_PLATFORM_LOGIN_PATH', '/v1/auth/login'),
     'introspect_ttl' => (int) env('VREMOTE_INTROSPECT_TTL', 30),
