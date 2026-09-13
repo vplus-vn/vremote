@@ -34,6 +34,14 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         val p = prefs()
+        // Persist any uncaught crash so it can be shown (and screenshotted) on the next launch,
+        // instead of the app just vanishing. Native (SIGSEGV) crashes can't be caught here.
+        Thread.getDefaultUncaughtExceptionHandler().let { prev ->
+            Thread.setDefaultUncaughtExceptionHandler { th, e ->
+                try { p.edit().putString("lastCrash", (e.message ?: e.toString()) + "\n" + e.stackTraceToString().take(3000)).apply() } catch (_: Throwable) {}
+                prev?.uncaughtException(th, e)
+            }
+        }
         if (p.getString("machineCode", "").isNullOrEmpty()) {
             val aid = try { Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) } catch (e: Exception) { null }
             p.edit().putString("machineCode", "android-" + (aid ?: java.util.UUID.randomUUID().toString())).apply()
@@ -44,6 +52,11 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 48, 32, 32) }
         root.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f })
         root.addView(TextView(this).apply { text = "Chia sẻ màn hình thiết bị này"; setTextColor(0xFF6B7280.toInt()) })
+
+        p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let { c ->
+            root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước — chụp gửi kỹ thuật:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 16, 0, 8) })
+            root.addView(Button(this).apply { text = "Xoá thông báo lỗi"; setOnClickListener { p.edit().remove("lastCrash").apply(); recreate() } })
+        }
 
         root.addView(label("Máy chủ (Base URL)"))
         baseUrlInput = EditText(this).apply { setText(p.getString("baseUrl", "https://vremote.vplus.vn")); inputType = InputType.TYPE_TEXT_VARIATION_URI }
