@@ -18,9 +18,14 @@ final class SessionController {
    if(!$pairing->redeemGrant($device,(string)$request->attributes->get('actor','unknown'),(string)($data['connectGrant']??'')))return response()->json(['error'=>['code'=>'CONNECT_REQUIRED','message'=>'Enter the device ID + password to connect first']],403);
   }elseif(($resp=$this->authorizeDevice($request,$authz,$data['deviceId'],$perm))!==null){return $resp;}
   $ttl=(int)config('vremote.session_ttl',1800);$sessionId='S-'.Str::upper(Str::random(12));$nonce=bin2hex(random_bytes(16));$ts=time();$sig=$signer->sign((string)$device['deviceToken'],$signer->canonicalSessionEnable(['deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts]));
+  // ICE (STUN + credentialed TURN) is computed once and given to BOTH sides: the agent (in
+  // session.enable) and the viewer (in the response). Without TURN on the agent side too, a
+  // cross-internet (mobile<->desktop) peer connection can't traverse NAT — the tool must work
+  // across networks, not just LAN.
+  $ice=config('vremote.ice_servers',[]);$t=$turn->forSession($data['deviceId'],$ttl);if($t)$ice[]=$t;
   $session=['sessionId'=>$sessionId,'deviceId'=>$data['deviceId'],'capability'=>$data['capability'],'ttlSec'=>$ttl,'createdAt'=>now()->toIso8601String(),'actor'=>$request->attributes->get('actor','unknown'),'source'=>'console'];$store->put($session);
-  if(!$this->sendAgent(['type'=>'session.enable','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts,'sig'=>$sig])){$store->forget($sessionId);return response()->json(['error'=>['code'=>'DEVICE_UNREACHABLE','message'=>'Agent signaling channel unavailable']],503);}
-  $ice=config('vremote.ice_servers',[]);$t=$turn->forSession($data['deviceId'],$ttl);if($t)$ice[]=$t;$audit->append(['actor'=>$session['actor'],'action'=>'session.open','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'source'=>'console','result'=>'accepted']);
+  if(!$this->sendAgent(['type'=>'session.enable','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts,'sig'=>$sig,'iceServers'=>$ice])){$store->forget($sessionId);return response()->json(['error'=>['code'=>'DEVICE_UNREACHABLE','message'=>'Agent signaling channel unavailable']],503);}
+  $audit->append(['actor'=>$session['actor'],'action'=>'session.open','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'source'=>'console','result'=>'accepted']);
   return response()->json(['sessionId'=>$sessionId,'capability'=>$data['capability'],'signalingUrl'=>config('vremote.signaling_url'),'sessionToken'=>$tokens->issue($sessionId,$data['deviceId'],$data['capability'],$ttl),'iceServers'=>$ice,'ttlSec'=>$ttl],201);
  }
  public function destroy(Request $request,string $sessionId,SessionStore $store,AuditStore $audit):JsonResponse{
