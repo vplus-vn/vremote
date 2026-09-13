@@ -53,6 +53,9 @@ class MainActivity : Activity() {
         root.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f })
         root.addView(TextView(this).apply { text = "Chia sẻ màn hình thiết bị này"; setTextColor(0xFF6B7280.toInt()) })
 
+        p.getString("crumb", "")?.takeIf { it.isNotEmpty() }?.let { cr ->
+            root.addView(TextView(this).apply { text = "🔎 Bước cuối trước khi dừng: $cr — chụp gửi kỹ thuật"; setTextColor(0xFF2563EB.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
+        }
         p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let { c ->
             root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước — chụp gửi kỹ thuật:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 16, 0, 8) })
             root.addView(Button(this).apply { text = "Xoá thông báo lỗi"; setOnClickListener { p.edit().remove("lastCrash").apply(); recreate() } })
