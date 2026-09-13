@@ -69,6 +69,7 @@ class MainActivity : Activity() {
         root.addView(requireAcceptBox)
 
         root.addView(Button(this).apply { text = "Bắt đầu chia sẻ màn hình"; setOnClickListener { startShare() } })
+        root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
         status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 24, 0, 0) }
         root.addView(status)
 
@@ -92,6 +93,35 @@ class MainActivity : Activity() {
                 runOnUiThread { idView.text = fmtId(a.pairingId); status.text = "Sẵn sàng. Bấm “Bắt đầu chia sẻ màn hình”." }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "Lỗi kết nối máy chủ: " + (e.message ?: e.toString()) }
+            }
+        }.start()
+    }
+
+    /** Fetch the published manifest; if it advertises a newer versionCode, download + install it. */
+    private fun checkForUpdate() {
+        val base = baseUrlInput.text.toString().trim().ifEmpty { "https://vremote.vplus.vn" }
+        status.text = "Đang kiểm tra bản cập nhật…"
+        Thread {
+            try {
+                val info = ApiClient.latest(base)
+                if (info.versionCode <= BuildConfig.VERSION_CODE) {
+                    runOnUiThread { status.text = "Đã là bản mới nhất (${BuildConfig.VERSION_NAME})."; toast("Đã là bản mới nhất") }
+                    return@Thread
+                }
+                if (!AgentUpdater.canInstall(this)) {
+                    runOnUiThread {
+                        status.text = "Cần cấp quyền “Cài đặt ứng dụng không xác định”, sau đó bấm lại."
+                        startActivity(AgentUpdater.unknownSourcesIntent(this))
+                    }
+                    return@Thread
+                }
+                runOnUiThread { status.text = "Đang tải bản ${info.versionName}… 0%" }
+                val apk = AgentUpdater.download(this, base, info) { pct ->
+                    runOnUiThread { status.text = if (pct >= 0) "Đang tải bản ${info.versionName}… $pct%" else "Đang tải bản ${info.versionName}…" }
+                }
+                runOnUiThread { status.text = "Đang cài đặt bản ${info.versionName}…"; AgentUpdater.install(this, apk) }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Lỗi cập nhật: " + (e.message ?: e.toString()) }
             }
         }.start()
     }
