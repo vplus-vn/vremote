@@ -46,10 +46,23 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon
       - name: Stage APK as vremote-agent.apk
         run: cp agent-android/app/build/outputs/apk/debug/app-debug.apk vremote-agent.apk
+      # Version manifest the in-app updater polls. Derived from the freshly built APK via aapt so
+      # it can never drift from what actually shipped. Served statically at /downloads/vremote-agent.json.
+      - name: Generate version manifest (vremote-agent.json)
+        run: |
+          set -euo pipefail
+          AAPT="$(ls "$ANDROID_HOME"/build-tools/*/aapt | sort | tail -n1)"
+          BADGE="$("$AAPT" dump badging vremote-agent.apk)"
+          VCODE="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n1)"
+          VNAME="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
+          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote-agent.apk", "notes": ""}\n' "$VCODE" "$VNAME" > vremote-agent.json
+          cat vremote-agent.json
       - uses: actions/upload-artifact@v4
         with:
           name: vremote-agent-apk
-          path: vremote-agent.apk
+          path: |
+            vremote-agent.apk
+            vremote-agent.json
           if-no-files-found: error
 
   deploy:
@@ -166,7 +179,9 @@ jobs:
           if [ -f agent-apk/vremote-agent.apk ]; then
             SSH="ssh -p $DEPLOY_PORT -i ~/.ssh/id_deploy"
             rsync -az -e "$SSH" agent-apk/vremote-agent.apk "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/vremote-agent.apk"
-            echo "Published vremote-agent.apk to shared/downloads."
+            # Publish the version manifest alongside the APK so the in-app updater sees the new version.
+            [ -f agent-apk/vremote-agent.json ] && rsync -az -e "$SSH" agent-apk/vremote-agent.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/vremote-agent.json"
+            echo "Published vremote-agent.apk (+ manifest) to shared/downloads."
           else
             echo "No APK artifact this run (build-agent skipped/failed); keeping existing download."
           fi

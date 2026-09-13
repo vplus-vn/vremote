@@ -33,7 +33,7 @@ object ApiClient {
 
     fun announce(baseUrl: String, machineCode: String, sessionPwHash: String, personalPwHash: String?, requireAccept: Boolean): Announce {
         val body = JSONObject()
-            .put("machineCode", machineCode).put("agentVersion", "android-0.2.0").put("platform", "android")
+            .put("machineCode", machineCode).put("agentVersion", "android-" + BuildConfig.VERSION_NAME).put("platform", "android")
             .put("sessionPasswordHash", sessionPwHash).put("requireAccept", requireAccept)
         if (personalPwHash != null) body.put("personalPasswordHash", personalPwHash)
         val req = Request.Builder().url(apiBase(baseUrl) + "/agent/announce")
@@ -63,6 +63,20 @@ object ApiClient {
         val req = Request.Builder().url(apiBase(baseUrl) + "/agent/" + deviceId + "/respond")
             .header("X-Device-Token", deviceToken).post(body.toString().toRequestBody(JSON)).build()
         http.newCall(req).execute().use { }
+    }
+
+    data class Latest(val versionCode: Int, val versionName: String, val url: String, val notes: String)
+
+    /** Fetch the published version manifest served statically at <base>/downloads/vremote-agent.json. */
+    fun latest(baseUrl: String): Latest {
+        val req = Request.Builder().url(baseUrl.trimEnd('/') + "/downloads/vremote-agent.json").get().build()
+        http.newCall(req).execute().use { r ->
+            val txt = r.body?.string() ?: ""
+            if (!r.isSuccessful) throw RuntimeException(parseErr(txt, r.code))
+            val j = JSONObject(txt)
+            return Latest(j.getInt("versionCode"), j.optString("versionName"),
+                j.optString("url", "/downloads/vremote-agent.apk"), j.optString("notes", ""))
+        }
     }
 
     private fun parseErr(txt: String, code: Int): String = try {

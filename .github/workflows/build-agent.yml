@@ -30,8 +30,20 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon
       - name: Stage APK as vremote-agent.apk
         run: cp agent-android/app/build/outputs/apk/debug/app-debug.apk vremote-agent.apk
+      # Version manifest for the in-app updater; derived from the built APK so it can't drift.
+      - name: Generate version manifest (vremote-agent.json)
+        run: |
+          set -euo pipefail
+          AAPT="$(ls "$ANDROID_HOME"/build-tools/*/aapt | sort | tail -n1)"
+          BADGE="$("$AAPT" dump badging vremote-agent.apk)"
+          VCODE="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n1)"
+          VNAME="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
+          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote-agent.apk", "notes": ""}\n' "$VCODE" "$VNAME" > vremote-agent.json
+          cat vremote-agent.json
       - uses: actions/upload-artifact@v4
         with:
           name: vremote-agent-apk
-          path: vremote-agent.apk
+          path: |
+            vremote-agent.apk
+            vremote-agent.json
           if-no-files-found: error
