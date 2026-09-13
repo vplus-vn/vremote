@@ -156,6 +156,7 @@ final class DeviceController
             'requireAccept' => (bool) ($d['requireAccept'] ?? false),
             'agentVersion' => $d['agentVersion'] ?? null,
             'lastSeenAt' => $d['lastSeenAt'] ?? null,
+            'createdAt' => $d['createdAt'] ?? null,
             'activeSessions' => $d['activeSessions'] ?? 0,
         ];
     }
