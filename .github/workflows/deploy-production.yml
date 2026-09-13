@@ -41,11 +41,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
-      - name: Assemble agent APK (debug-signed, sideloadable)
+      - name: Assemble agent APK (release-signed if keystore secret present, else debug)
         working-directory: agent-android
-        run: gradle :app:assembleDebug --no-daemon
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/vremote-release.jks"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/vremote-release.jks"
+            gradle :app:assembleRelease --no-daemon
+            echo "AGENT_APK=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+            echo "Built RELEASE-signed APK (stable signature -> in-app update works)."
+          else
+            gradle :app:assembleDebug --no-daemon
+            echo "AGENT_APK=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+            echo "No keystore secret -> DEBUG-signed APK (updates need reinstall)."
+          fi
       - name: Stage APK as vremote-agent.apk
-        run: cp agent-android/app/build/outputs/apk/debug/app-debug.apk vremote-agent.apk
+        run: cp "agent-android/${AGENT_APK}" vremote-agent.apk
       # Version manifest the in-app updater polls. Derived from the freshly built APK via aapt so
       # it can never drift from what actually shipped. Served statically at /downloads/vremote-agent.json.
       - name: Generate version manifest (vremote-agent.json)
