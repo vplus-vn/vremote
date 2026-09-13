@@ -1,4 +1,4 @@
-package vn.vplus.vremote.agent
+package vn.vremote
 
 import android.content.BroadcastReceiver
 import android.content.Context

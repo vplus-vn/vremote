@@ -1,4 +1,4 @@
-package vn.vplus.vremote.agent
+package vn.vremote
 
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient

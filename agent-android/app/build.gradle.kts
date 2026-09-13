@@ -2,8 +2,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins { id("com.android.application"); kotlin("android") }
 
-android { namespace = "vn.vplus.vremote.agent"; compileSdk = 35
-    defaultConfig { applicationId = "vn.vplus.vremote.agent"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "0.0.1" }
+android { namespace = "vn.vremote"; compileSdk = 35
+    defaultConfig { applicationId = "vn.vremote"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "0.0.1" }
     // BuildConfig.VERSION_NAME/VERSION_CODE are used by the in-app updater; AGP 8 leaves this off by default.
     buildFeatures { buildConfig = true }
     // Java and Kotlin must target the same JVM level or the Kotlin plugin fails the build
