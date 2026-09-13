@@ -24,7 +24,11 @@
 .section-actions{display:flex;gap:8px}
 button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
 button.ghost{background:#f3f4f6;color:#374151}
-.row-actions{display:flex;gap:8px}
+.row-actions{display:flex;gap:8px;flex-wrap:wrap}
+tbody tr.pinned{background:#fffbeb}
+tbody tr.pinned td:first-child{box-shadow:inset 3px 0 0 #f59e0b}
+button.ghost.pinned-btn{background:#fef3c7;color:#92400e}
+.pin-dot{font-size:12px}
 .reg-form{border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:16px;background:#fafbfc}
 .reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .reg-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#374151}
