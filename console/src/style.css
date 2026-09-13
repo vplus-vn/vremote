@@ -25,6 +25,15 @@
 button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
 button.ghost{background:#f3f4f6;color:#374151}
 .row-actions{display:flex;gap:8px;flex-wrap:wrap}
+.filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 12px}
+.filters .search{flex:1;min-width:200px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
+.filters select{padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;background:#fff}
+.filters .count{color:#6b7280;font-size:13px;margin-left:auto}
+.ts{color:#475569;font-size:12px;white-space:nowrap}
+.alias{color:#111827}
+button.linklike{background:none;border:none;color:#2563eb;cursor:pointer;padding:2px 4px;font-size:14px}
+.pager{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:14px;color:#374151;font-size:14px}
+.pager button{padding:6px 12px}
 tbody tr.pinned{background:#fffbeb}
 tbody tr.pinned td:first-child{box-shadow:inset 3px 0 0 #f59e0b}
 button.ghost.pinned-btn{background:#fef3c7;color:#92400e}
