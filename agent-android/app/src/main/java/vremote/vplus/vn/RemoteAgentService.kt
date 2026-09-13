@@ -77,8 +77,14 @@ class RemoteAgentService : Service() {
      // is acquired — ScreenCapturerAndroid.startCapture() acquires it internally, so switch the
      // foreground type FIRST, then startCapture. Revert to the signaling type if capture fails.
      startFgProjection();crumb("proj:startCapture");
-     // Low resolution/fps: weak TV boxes crash their video pipeline at 720p when encoding starts.
-     try{capt.initialize(h,this,src.capturerObserver);capt.startCapture(640,360,10)}catch(_:Throwable){onProjectionRevoked();return false};crumb("proj:capturing");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
+     // Capture at 320x240: BOTH dimensions are exact multiples of 16 (320=20*16, 240=15*16).
+     // The prior 640x360 crashed natively the instant the encoder started (crumb stuck at
+     // "offer:local ok") on BOTH the SW and HW encoders — the common factor was the height 360,
+     // which is NOT 16-aligned (360=22.5*16). H264/VP8 encode in 16x16 macroblocks, so a non-16
+     // height makes the encoder's OMX component crop/pad a 640x368 buffer to 360; on this cheap
+     // box's GL/codec driver that stride handling faults (SIGSEGV). A fully 16-aligned size needs
+     // no cropping and sidesteps it. 320x240 is also tiny enough for a weak box to encode at all.
+     try{capt.initialize(h,this,src.capturerObserver);capt.startCapture(320,240,10)}catch(_:Throwable){onProjectionRevoked();return false};crumb("proj:capturing");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
     // ICE servers are authoritatively supplied by session.enable's `iceServers`; parse null-safely.
     // Each element: {"urls": String|[String], "username"?, "credential"?}. Falls back to google STUN.
     private fun parseIceServers(arr:JSONArray?):List<PeerConnection.IceServer>{val out=mutableListOf<PeerConnection.IceServer>();if(arr!=null)for(i in 0 until arr.length()){val o=arr.optJSONObject(i)?:continue;val urls=mutableListOf<String>();when(val u=o.opt("urls")){is String->if(u.isNotBlank())urls.add(u);is JSONArray->for(j in 0 until u.length()){val s=u.optString(j);if(s.isNotBlank())urls.add(s)}};if(urls.isEmpty())continue;val b=PeerConnection.IceServer.builder(urls);val user=o.optString("username","");val cred=o.optString("credential","");if(user.isNotEmpty()&&cred.isNotEmpty()){b.setUsername(user);b.setPassword(cred)};try{out.add(b.createIceServer())}catch(_:Throwable){}};return out}
