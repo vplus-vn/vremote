@@ -11,8 +11,10 @@
 # Config: the backend .env is the SINGLE SOURCE OF TRUTH. The signaling service reads it
 # directly (Mongo connection + the shared VREMOTE_SESSION_SECRET / _SIGNALING_INTERNAL_SECRET)
 # and resolves Laravel-style ${SERVICES} itself. shared/signaling.env is an OPTIONAL override
-# (e.g. custom PORT/INTERNAL_PORT); it may be absent. Ensure the backend .env is group-readable
-# by www-data (chown vdeploy:www-data .env; chmod 640).
+# for vars NOT present in the backend .env — ONLY PORT/INTERNAL_PORT. It may be absent.
+# IMPORTANT: it is loaded FIRST so the backend .env is authoritative and always wins; never put
+# MONGODB_* in signaling.env (a stale MONGODB_PORT there once shadowed the real 22688 and broke
+# device auth). Ensure the backend .env is group-readable by www-data (chown vdeploy:www-data .env; chmod 640).
 
 [Unit]
 Description=VRemote signaling service
@@ -23,8 +25,10 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/vremote.vplus.vn/current/signaling
-EnvironmentFile=/var/www/vremote.vplus.vn/shared/.env
+# Order matters: optional overrides FIRST, then the backend .env (single source of truth) LAST
+# so its Mongo connection + shared secrets always win. Do NOT swap these lines.
 EnvironmentFile=-/var/www/vremote.vplus.vn/shared/signaling.env
+EnvironmentFile=/var/www/vremote.vplus.vn/shared/.env
 ExecStart=/usr/bin/node dist/server.js
 Restart=always
 RestartSec=3

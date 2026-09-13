@@ -78,7 +78,7 @@ App secrets (session/signaling/TURN secrets, DB password, VPlus keys) live **onl
    sudo mkdir -p /var/www/vremote.vplus.vn/{releases,shared/downloads,shared/backend-storage}
    sudo chown -R vdeploy:vdeploy /var/www/vremote.vplus.vn
    ```
-4. Create `shared/.env` from `backend/.env.example` (fill real secrets). This is the **single source of truth** — the signaling service reads it directly for the Mongo connection and the shared `VREMOTE_SESSION_SECRET` / `VREMOTE_SIGNALING_INTERNAL_SECRET`, resolving `${SERVICES}` itself. Make it group-readable by www-data: `chown vdeploy:www-data shared/.env && chmod 640 shared/.env`. `shared/signaling.env` is OPTIONAL (only for overrides like a custom `PORT`).
+4. Create `shared/.env` from `backend/.env.example` (fill real secrets). This is the **single source of truth** — the signaling service reads it directly for the Mongo connection and the shared `VREMOTE_SESSION_SECRET` / `VREMOTE_SIGNALING_INTERNAL_SECRET`, resolving `${SERVICES}` itself. Make it group-readable by www-data: `chown vdeploy:www-data shared/.env && chmod 640 shared/.env`. `shared/signaling.env` is OPTIONAL and, if present, must contain **only** `PORT`/`INTERNAL_PORT` overrides — the unit loads it *before* the backend `.env` so `.env` always wins. Never put `MONGODB_*` in `signaling.env` (a stale `MONGODB_PORT` there shadows the real port and breaks agent auth).
 5. nginx: install `deploy/nginx/vremote.vplus.vn.conf`, provision TLS (certbot), enable the site.
 6. systemd: install `deploy/systemd/vremote-signaling.service`, then `sudo systemctl enable --now vremote-signaling`.
 7. Grant the deploy user NOPASSWD sudo for exactly the reload commands used by the workflow:

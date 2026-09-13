@@ -31,6 +31,9 @@ function mongoUri():string|null{
 let mongoTokens:{get(id:string):Promise<string|null>}|null=null;
 (function initMongo(){
  const uri=mongoUri(); if(!uri){console.log('VRemote signaling: Mongo device lookup disabled (no MONGODB_* configured)');return;}
+ // Log the resolved target (host:port/db) with credentials stripped, so a wrong port
+ // (e.g. a stale 27017 overriding the backend .env's real port) is obvious in the journal.
+ const redacted=uri.replace(/\/\/[^@]*@/,'//');console.log(`VRemote signaling: Mongo target ${redacted}`);
  const client=new MongoClient(uri,{serverSelectionTimeoutMS:3000});
  const cache=new Map<string,{token:string|null;at:number}>(); const TTL=15000;
  let ready=false; client.connect().then(()=>{ready=true;console.log('VRemote signaling: Mongo device lookup enabled')}).catch(e=>console.error('VRemote signaling: Mongo connect failed',e?.message??e));
