@@ -38,8 +38,15 @@ class RemoteAgentService : Service() {
     private val seenNonces=ConcurrentHashMap.newKeySet<String>(); private val processedCommands=ConcurrentHashMap.newKeySet<String>(); private val handler=Handler(Looper.getMainLooper())
     // Encoder mode ("sw"/"hw") + capture size are pref-driven so the combo that survives this box's
     // video pipeline can be found in ONE build (MainActivity cycles them). Read once in onCreate/startProjection.
-    private var encMode="sw"; private var capW=320; private var capH=240; private var capFps=10
-    private fun cfg()="[$encMode ${capW}x${capH}]"
+    private var encMode="sw"; private var capW=0; private var capH=0; private var capFps=10; private var capMaxEdge=640
+    private fun cfg()="[$encMode ${capW}x${capH} q$capMaxEdge]"
+    // Capture size follows the DEVICE'S OWN screen (aspect ratio preserved), downscaled so the long edge
+    // <= capMaxEdge, then rounded to a multiple of 16 (H264/VP8 macroblock alignment — a non-16 dimension
+    // makes the encoder crop/pad, which faulted on the weak box). This keeps the remote view correct for
+    // portrait or landscape screens at ANY resolution, rather than a hardcoded size, while capMaxEdge lets
+    // a weak box be tuned down. Fps stays modest.
+    private fun align16(v:Int)=(((v+8)/16)*16).coerceAtLeast(16)
+    private fun computeCaptureSize(){cacheScreenSize();var w=screenW;var h=screenH;if(w<=0||h<=0){w=1280;h=720};val longEdge=maxOf(w,h);val maxE=capMaxEdge.coerceAtLeast(160);if(longEdge>maxE){val s=maxE.toDouble()/longEdge;w=(w*s).toInt();h=(h*s).toInt()};capW=align16(w);capH=align16(h)}
     override fun onCreate(){super.onCreate();getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
      // Encoder mode + capture resolution are CONFIGURABLE (MainActivity cycles them) so the exact
      // combination that survives this box's video pipeline can be found in ONE build. The crash was a
@@ -48,7 +55,7 @@ class RemoteAgentService : Service() {
      //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8, no MediaCodec — sidesteps a broken hardware
      //          codec, at the cost of a texture->I420 readback the box's GL driver may still fault on).
      //  - "hw": DefaultVideoEncoderFactory surface mode (no readback, uses the box's MediaCodec directly).
-     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","sw")?:"sw";capW=p0.getInt("capW",320);capH=p0.getInt("capH",240);capFps=p0.getInt("capFps",10)
+     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","sw")?:"sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
      val encoderFactory:VideoEncoderFactory=if(encMode=="hw")DefaultVideoEncoderFactory(egl.eglBaseContext,true,false) else SoftwareVideoEncoderFactory()
      crumb("factory ${cfg()}")
      factory=PeerConnectionFactory.builder().setVideoEncoderFactory(encoderFactory).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
@@ -86,10 +93,9 @@ class RemoteAgentService : Service() {
      // is acquired — ScreenCapturerAndroid.startCapture() acquires it internally, so switch the
      // foreground type FIRST, then startCapture. Revert to the signaling type if capture fails.
      startFgProjection();crumb("proj:startCapture");
-     // Capture size is pref-driven (default 320x240; both 16-aligned). Presets stay 16-aligned
-     // (320x240, 256x144) — H264/VP8 encode in 16x16 macroblocks, and a non-16 dimension makes the
-     // encoder crop/pad, which faults on this box's driver.
-     try{capt.initialize(h,this,src.capturerObserver);capt.startCapture(capW,capH,capFps)}catch(_:Throwable){onProjectionRevoked();return false};crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
+     // Derive the capture size from THIS device's screen (aspect preserved, 16-aligned, long edge
+     // <= capMaxEdge) right before capturing, so it adapts to any device/resolution.
+     computeCaptureSize();try{capt.initialize(h,this,src.capturerObserver);capt.startCapture(capW,capH,capFps)}catch(_:Throwable){onProjectionRevoked();return false};crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
     // ICE servers are authoritatively supplied by session.enable's `iceServers`; parse null-safely.
     // Each element: {"urls": String|[String], "username"?, "credential"?}. Falls back to google STUN.
     private fun parseIceServers(arr:JSONArray?):List<PeerConnection.IceServer>{val out=mutableListOf<PeerConnection.IceServer>();if(arr!=null)for(i in 0 until arr.length()){val o=arr.optJSONObject(i)?:continue;val urls=mutableListOf<String>();when(val u=o.opt("urls")){is String->if(u.isNotBlank())urls.add(u);is JSONArray->for(j in 0 until u.length()){val s=u.optString(j);if(s.isNotBlank())urls.add(s)}};if(urls.isEmpty())continue;val b=PeerConnection.IceServer.builder(urls);val user=o.optString("username","");val cred=o.optString("credential","");if(user.isNotEmpty()&&cred.isNotEmpty()){b.setUsername(user);b.setPassword(cred)};try{out.add(b.createIceServer())}catch(_:Throwable){}};return out}
