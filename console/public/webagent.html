@@ -75,6 +75,9 @@ let state={deviceId:LS.getItem('vremote.deviceId')||'',deviceToken:LS.getItem('v
 let stream=null,ws=null,pollTimer=null,pendingReq=null;
 const peers=new Map(); // sessionId -> RTCPeerConnection
 const ICE=[{urls:'stun:stun.l.google.com:19302'}];
+// Authoritative ICE (STUN + credentialed TURN) is delivered by the server in session.enable;
+// without TURN on the agent side too, cross-internet (NAT) peer connections can't traverse.
+let iceServers=ICE;
 
 async function announce(){
  const body={machineCode:machineCode(),agentVersion:'web-0.2.0',platform:'web',
@@ -113,12 +116,13 @@ function connectWs(){
  ws.onmessage=async ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
   if(m.type==='agent.authenticated'){ws.send(JSON.stringify({type:'agent.hello',deviceId:state.deviceId,agentVersion:'web-0.2.0',platform:'web'}));setStatus('Sẵn sàng — đã kết nối signaling.');return}
   if(m.type==='agent.signaling'&&m.payload){await onViewerSignal(m.sessionId,m.payload);return}
-  // session.enable arrives on this authenticated channel; we already hold the capture, nothing to do.
+  // session.enable carries the credentialed ICE servers (STUN + TURN) for this session; adopt them.
+  if(m.type==='session.enable'){if(Array.isArray(m.iceServers)&&m.iceServers.length)iceServers=m.iceServers;return}
  };
 }
 async function onViewerSignal(sessionId,p){
  if(p.type==='offer'){
-  const pc=new RTCPeerConnection({iceServers:ICE}); peers.set(sessionId,pc);
+  const pc=new RTCPeerConnection({iceServers}); peers.set(sessionId,pc);
   stream.getTracks().forEach(t=>pc.addTrack(t,stream));
   pc.onicecandidate=e=>{if(e.candidate&&ws&&ws.readyState===1)ws.send(JSON.stringify({type:'agent.signaling',sessionId,payload:{type:'candidate',sessionId,candidate:e.candidate.toJSON()}}));};
   pc.onconnectionstatechange=()=>{if(['closed','failed','disconnected'].includes(pc.connectionState)){pc.close();peers.delete(sessionId)}};

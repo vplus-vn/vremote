@@ -1,8 +1,9 @@
-package vn.vplus.vremote.agent
+package vremote.vplus.vn
 
 import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -25,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var requireAcceptBox: CheckBox
     private lateinit var status: TextView
     private lateinit var accessBtn: Button
+    private lateinit var readyBtn: Button
     private var sessionPw = ""
 
     private fun prefs() = getSharedPreferences("vremote", MODE_PRIVATE)
@@ -69,11 +71,16 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, v -> prefs().edit().putBoolean("requireAccept", v).apply(); announce() } }
         root.addView(requireAcceptBox)
 
-        root.addView(Button(this).apply { text = "Bắt đầu chia sẻ màn hình"; setOnClickListener { startShare() } })
-        root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
+        root.addView(label("Chỉ cần bật MỘT LẦN. Sau đó console kết nối được mà không cần chạm máy."))
+        readyBtn = Button(this).apply { text = "Bật sẵn sàng điều khiển (1 lần)"; setOnClickListener { startShare() } }
+        root.addView(readyBtn)
+        root.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
         root.addView(label("Điều khiển từ xa cần bật dịch vụ trợ năng VRemote."))
         accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
         root.addView(accessBtn)
+        root.addView(Button(this).apply { text = "Bỏ giới hạn tiết kiệm pin (tuỳ chọn)"; setOnClickListener { openBatterySettings() } })
+        root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
+        root.addView(label("Sau khi khởi động lại máy, cần bật lại “sẵn sàng điều khiển” một lần."))
         status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 24, 0, 0) }
         root.addView(status)
 
@@ -81,9 +88,29 @@ class MainActivity : Activity() {
         announce()
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onResume() { super.onResume(); refreshReady() }
+
+    /** Reflect the live "ready" state: projection held + accessibility enabled. */
+    private fun refreshReady() {
         if (::accessBtn.isInitialized) accessBtn.text = if (VRemoteInputService.isEnabled()) "Đã bật điều khiển ✓" else "Cho phép điều khiển (Accessibility)"
+        val held = RemoteAgentService.projectionHeld
+        if (::readyBtn.isInitialized) readyBtn.text = if (held) "Sẵn sàng chia sẻ ✓ (đã cho phép)" else "Bật sẵn sàng điều khiển (1 lần)"
+        if (::status.isInitialized) {
+            if (held) { status.text = "Sẵn sàng nhận điều khiển ✓"; status.setTextColor(0xFF16A34A.toInt()) }
+            else { status.text = "Đang nhận kết nối. Bật “sẵn sàng điều khiển” 1 lần để cho phép chạm/vuốt."; status.setTextColor(0xFF6B7280.toInt()) }
+        }
+    }
+
+    /** Start (or signal) the foreground agent service. Pass the projection result Intent to enable video. */
+    private fun startAgentService(data: Intent?) {
+        val i = data?.takeIf { it.action == RemoteAgentService.ACTION_STOP }
+            ?: Intent(this, RemoteAgentService::class.java).also { if (data != null) it.putExtra(RemoteAgentService.EXTRA_RESULT_CODE, RESULT_OK).putExtra(RemoteAgentService.EXTRA_DATA, data) }
+        startForegroundService(i)
+    }
+
+    private fun openBatterySettings() {
+        try { startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.parse("package:$packageName"))) }
+        catch (e: Exception) { try { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } catch (_: Exception) {} }
     }
 
     /** Register/refresh this device and show its ID + password (only hashes leave the device). */
@@ -99,7 +126,9 @@ class MainActivity : Activity() {
                 val a = ApiClient.announce(base, machineCode, ApiClient.sha256(sessionPw), if (personal.isNotEmpty()) ApiClient.sha256(personal) else "", requireAccept)
                 p.edit().putString("deviceId", a.deviceId).putString("deviceToken", a.deviceToken)
                     .putString("pairingId", a.pairingId).putString("signalingUrl", ApiClient.signalingUrl(base)).apply()
-                runOnUiThread { idView.text = fmtId(a.pairingId); status.text = "Sẵn sàng. Bấm “Bắt đầu chia sẻ màn hình”." }
+                // Start the service the moment we have creds so signaling connects and the device is
+                // reachable WITHOUT pressing share. Projection (video) is enabled separately, one-time.
+                runOnUiThread { idView.text = fmtId(a.pairingId); startAgentService(null); refreshReady() }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "Lỗi kết nối máy chủ: " + (e.message ?: e.toString()) }
             }
@@ -145,9 +174,8 @@ class MainActivity : Activity() {
     override fun onActivityResult(r: Int, c: Int, d: Intent?) {
         super.onActivityResult(r, c, d)
         if (r == requestCode && c == RESULT_OK && d != null) {
-            startForegroundService(Intent(this, RemoteAgentService::class.java)
-                .putExtra(RemoteAgentService.EXTRA_RESULT_CODE, c).putExtra(RemoteAgentService.EXTRA_DATA, d))
-            status.text = "Đang chia sẻ. Nhập ID + mật khẩu ở console để xem."
+            startAgentService(d)
+            status.text = "Đã bật sẵn sàng. Console kết nối được mà không cần thao tác thêm."
         }
     }
 

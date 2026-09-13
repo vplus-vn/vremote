@@ -1,4 +1,4 @@
-package vn.vplus.vremote.agent
+package vremote.vplus.vn
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
