@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_desc">VRemote dùng dịch vụ này để nhận điều khiển từ xa (chạm, vuốt, phím) khi bạn cho phép kết nối.</string>
+</resources>

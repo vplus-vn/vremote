@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var personalInput: EditText
     private lateinit var requireAcceptBox: CheckBox
     private lateinit var status: TextView
+    private lateinit var accessBtn: Button
     private var sessionPw = ""
 
     private fun prefs() = getSharedPreferences("vremote", MODE_PRIVATE)
@@ -70,11 +71,19 @@ class MainActivity : Activity() {
 
         root.addView(Button(this).apply { text = "Bắt đầu chia sẻ màn hình"; setOnClickListener { startShare() } })
         root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
+        root.addView(label("Điều khiển từ xa cần bật dịch vụ trợ năng VRemote."))
+        accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
+        root.addView(accessBtn)
         status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 24, 0, 0) }
         root.addView(status)
 
         setContentView(ScrollView(this).apply { addView(root) })
         announce()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::accessBtn.isInitialized) accessBtn.text = if (VRemoteInputService.isEnabled()) "Đã bật điều khiển ✓" else "Cho phép điều khiển (Accessibility)"
     }
 
     /** Register/refresh this device and show its ID + password (only hashes leave the device). */

@@ -51,3 +51,8 @@ section .hint{color:#6b7280;font-size:13px;margin:4px 0 12px}
 /* Danger action */
 button.danger{color:#b91c1c;border-color:#e6bcbc}
 button.danger:hover{background:#fef2f2}
+
+/* Remote-control button bar under the video */
+.ctl-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.ctl-bar input{flex:1;min-width:140px}
+video{outline:none}
