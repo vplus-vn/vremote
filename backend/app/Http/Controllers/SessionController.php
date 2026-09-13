@@ -6,12 +6,17 @@ use App\Application\Authorization\AuthorizationService;use App\Application\Pairi
 final class SessionController {
  public function store(Request $request,DeviceRepository $registry,SessionStore $store,SessionTokenService $tokens,VRemoteSigningService $signer,TurnCredentialService $turn,AuditStore $audit,AuthorizationService $authz,PairingService $pairing):JsonResponse{
   $data=$request->validate(['deviceId'=>['required','string','max:128'],'capability'=>['required','in:view,control'],'preferredMaxFps'=>['nullable','integer','min:1','max:60'],'connectGrant'=>['nullable','string','max:128']]);$perm=$data['capability']==='view'?'edge.admin.view':'edge.admin.control';
-  if(($resp=$this->authorizeDevice($request,$authz,$data['deviceId'],$perm))!==null)return $resp;
   $device=$registry->get($data['deviceId']);if(!$device)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'Device not found']],404);if(($device['status']??'offline')!=='online')return response()->json(['error'=>['code'=>'DEVICE_OFFLINE','message'=>'Device is offline']],503);if(empty($device['deviceToken']))return response()->json(['error'=>['code'=>'DEVICE_NOT_PROVISIONED','message'=>'Device signing key unavailable']],503);
-  // Pairing-managed devices (UltraViewer/TeamViewer style) require a one-time connect grant
-  // from POST /devices/connect (operator entered the device ID + password, and the device
-  // accepted if it requires accept).
-  if(PairingService::isPairingManaged($device)&&!$pairing->redeemGrant($device,(string)$request->attributes->get('actor','unknown'),(string)($data['connectGrant']??'')))return response()->json(['error'=>['code'=>'CONNECT_REQUIRED','message'=>'Enter the device ID + password to connect first']],403);
+  // Authorization splits by device kind:
+  //  - Pairing-managed (UltraViewer/TeamViewer style): the one-time connect grant from
+  //    POST /devices/connect IS the authorization (operator supplied the device ID + password,
+  //    and the device accepted when it requires accept). Platform RBAC is NOT additionally
+  //    required — a valid platform login just gates reaching this endpoint at all. The grant is
+  //    bound to the connecting actor, so it can only be redeemed by the user who paired.
+  //  - Enrolled/managed devices: platform RBAC (+ tenant scoping when enforced).
+  if(PairingService::isPairingManaged($device)){
+   if(!$pairing->redeemGrant($device,(string)$request->attributes->get('actor','unknown'),(string)($data['connectGrant']??'')))return response()->json(['error'=>['code'=>'CONNECT_REQUIRED','message'=>'Enter the device ID + password to connect first']],403);
+  }elseif(($resp=$this->authorizeDevice($request,$authz,$data['deviceId'],$perm))!==null){return $resp;}
   $ttl=(int)config('vremote.session_ttl',1800);$sessionId='S-'.Str::upper(Str::random(12));$nonce=bin2hex(random_bytes(16));$ts=time();$sig=$signer->sign((string)$device['deviceToken'],$signer->canonicalSessionEnable(['deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts]));
   $session=['sessionId'=>$sessionId,'deviceId'=>$data['deviceId'],'capability'=>$data['capability'],'ttlSec'=>$ttl,'createdAt'=>now()->toIso8601String(),'actor'=>$request->attributes->get('actor','unknown'),'source'=>'console'];$store->put($session);
   if(!$this->sendAgent(['type'=>'session.enable','deviceId'=>$data['deviceId'],'sessionId'=>$sessionId,'capability'=>$data['capability'],'ttlSec'=>$ttl,'nonce'=>$nonce,'ts'=>$ts,'sig'=>$sig])){$store->forget($sessionId);return response()->json(['error'=>['code'=>'DEVICE_UNREACHABLE','message'=>'Agent signaling channel unavailable']],503);}
