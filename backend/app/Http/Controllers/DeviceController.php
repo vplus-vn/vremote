@@ -127,7 +127,7 @@ final class DeviceController
             'platform' => $d['platform'] ?? 'android',
             'status' => $d['status'] ?? 'offline',
             'enrollmentState' => $d['enrollmentState'] ?? EnrollmentState::UNENROLLED,
-            'requireAccept' => (bool) ($d['requireAccept'] ?? true),
+            'requireAccept' => (bool) ($d['requireAccept'] ?? false),
             'agentVersion' => $d['agentVersion'] ?? null,
             'lastSeenAt' => $d['lastSeenAt'] ?? null,
             'activeSessions' => $d['activeSessions'] ?? 0,

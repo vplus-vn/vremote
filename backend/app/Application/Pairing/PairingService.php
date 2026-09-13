@@ -60,8 +60,9 @@ final class PairingService
 
         $now = $this->clock->now();
         $device = $this->devices->findByMachineCode($machineCode);
+        $isNew = $device === null;
 
-        if ($device === null) {
+        if ($isNew) {
             $deviceId = 'DEV-' . strtoupper(bin2hex(random_bytes(4)));
             $pairingId = $this->uniquePairingId();
             $deviceToken = $this->secrets->token(32);
@@ -75,7 +76,7 @@ final class PairingService
                 'ownerTenantId' => null,            // assigned by the first successful connect
                 'enrollmentState' => EnrollmentState::UNENROLLED,
                 'credentialState' => CredentialState::ACTIVE,
-                'requireAccept' => true,
+                'requireAccept' => false, // default: connect without on-device approval; opt in per device
                 'createdAt' => $now,
             ];
         }
@@ -85,6 +86,9 @@ final class PairingService
         $deviceToken = (string) ($device['deviceToken'] ?? $this->secrets->token(32));
 
         $fields = [
+            // machineCode MUST be persisted so the next announce finds this same device
+            // (otherwise a new device + new ID is created every launch).
+            'machineCode' => $machineCode,
             'pairingId' => $pairingId,
             'deviceToken' => $deviceToken,
             'agentVersion' => $agentVersion,
@@ -101,13 +105,23 @@ final class PairingService
         if ($requireAccept !== null) {
             $fields['requireAccept'] = $requireAccept;
         }
+        if ($isNew) {
+            $fields += [
+                'name' => $machineCode,
+                'ownerTenantId' => null,
+                'enrollmentState' => EnrollmentState::UNENROLLED,
+                'credentialState' => CredentialState::ACTIVE,
+                'requireAccept' => (bool) ($requireAccept ?? false),
+                'createdAt' => $now,
+            ];
+        }
         $this->devices->update($deviceId, $fields);
 
         return [
             'deviceId' => $deviceId,
             'pairingId' => $pairingId,
             'deviceToken' => $deviceToken,
-            'requireAccept' => (bool) ($requireAccept ?? $device['requireAccept'] ?? true),
+            'requireAccept' => (bool) ($requireAccept ?? $device['requireAccept'] ?? false),
         ];
     }
 
