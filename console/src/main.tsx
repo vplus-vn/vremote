@@ -5,6 +5,9 @@ import './style.css';
 type Device={deviceId:string;pairingId?:string|null;machineCode?:string|null;name?:string|null;status:string;enrollmentState?:string|null};
 type Enroll={enrollmentId:string;code:string;token:string;expiresAt:number;qrUri:string;deviceId:string};
 type Grant={sessionId:string;capability:string;signalingUrl:string;sessionToken:string;iceServers:RTCIceServer[];ttlSec:number};
+// Drop any turn:/turns: entry missing username+credential — the browser rejects the whole
+// RTCPeerConnection ("Both username and credential are required...") if even one is malformed.
+function iceSafe(servers:RTCIceServer[]):RTCIceServer[]{return (servers||[]).filter(s=>{const urls=Array.isArray(s.urls)?s.urls:[s.urls];const needsCred=urls.some(u=>/^turns?:/i.test(String(u)));return !needsCred||(!!s.username&&!!s.credential);});}
 const agentDownloadUrl=import.meta.env.VITE_AGENT_DOWNLOAD_URL??'/downloads/vremote-agent.apk';
 const TOKEN_KEY='vremote_token';
 
@@ -180,7 +183,7 @@ function App(){
  async function view(deviceId:string,connectGrant?:string){close(); setError(''); try{
    const body:Record<string,unknown>={deviceId,capability:'view'}; if(connectGrant)body.connectGrant=connectGrant;
    const r=await authedFetch('/api/vremote/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); if(!r.ok)throw Error(await r.text()); const g:Grant=await r.json(); setGrant(g);
-   const peer=new RTCPeerConnection({iceServers:g.iceServers}); pc.current=peer; peer.ontrack=e=>{if(video.current)video.current.srcObject=e.streams[0]};
+   const peer=new RTCPeerConnection({iceServers:iceSafe(g.iceServers)}); pc.current=peer; peer.ontrack=e=>{if(video.current)video.current.srcObject=e.streams[0]};
    const sock=new WebSocket(g.signalingUrl); ws.current=sock;
    sock.onopen=()=>sock.send(JSON.stringify({type:'join',sessionToken:g.sessionToken}));
    sock.onmessage=async e=>{const m=JSON.parse(e.data); if(m.type==='joined'){const offer=await peer.createOffer({offerToReceiveVideo:true}); await peer.setLocalDescription(offer); if(sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'offer',sessionId:g.sessionId,sdp:offer.sdp}));} else if(m.type==='answer'){await peer.setRemoteDescription({type:'answer',sdp:m.sdp});} else if(m.type==='candidate'&&m.candidate){await peer.addIceCandidate(m.candidate).catch(()=>{});} else if(m.type==='error'){setError(`Signaling: ${m.code}`)}};

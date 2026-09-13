@@ -31,8 +31,11 @@ return [
     'viewer_url' => env('VREMOTE_VIEWER_URL', 'http://localhost:5173'),
     'gated_commands' => filter_var(env('VREMOTE_GATED_COMMANDS', 'false'), FILTER_VALIDATE_BOOL),
     'devices' => env('VREMOTE_DEVICES_JSON', '{}'),
+    // Baseline ICE = STUN only. TURN is added per-session by TurnCredentialService WITH
+    // ephemeral username+credential (coturn REST auth). A TURN url must never be emitted
+    // here without credentials: the browser rejects the whole RTCPeerConnection with
+    // "Both username and credential are required when the URL scheme is 'turn'/'turns'".
     'ice_servers' => array_values(array_filter([
         ['urls' => env('VREMOTE_STUN_URL', 'stun:stun.l.google.com:19302')],
-        env('VREMOTE_TURN_URLS') ? ['urls' => array_values(array_filter(array_map('trim', explode(',', (string) env('VREMOTE_TURN_URLS')))))] : null,
     ])),
 ];
