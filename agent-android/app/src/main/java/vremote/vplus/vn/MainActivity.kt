@@ -94,24 +94,32 @@ class MainActivity : Activity() {
         readyBtn = Button(this).apply { text = "Bật sẵn sàng điều khiển (1 lần)"; setOnClickListener { startShare() } }
         root.addView(readyBtn)
         root.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
-        // Diagnostic: cycle encoder mode + capture size in-app so the combo that survives this box's
-        // video pipeline can be found without a rebuild. Each crash breadcrumb is tagged [mode WxH].
-        root.addView(label("Nếu app bị VĂNG khi kết nối: bấm đổi chế độ mã hoá rồi thử lại."))
+        // Encoder mode + capture quality are adjustable in-app so a weak box can be tuned down (or a
+        // stuck video pipeline switched sw<->hw) WITHOUT a rebuild. Capture keeps the DEVICE'S OWN screen
+        // aspect ratio + resolution (just downscaled to the chosen quality), so it stays correct across
+        // many devices. Each crash breadcrumb is tagged [mode WxH qN].
+        root.addView(label("Nếu app bị VĂNG hoặc lag khi kết nối: đổi chế độ mã hoá / hạ chất lượng rồi thử lại."))
         val encBtn = Button(this).apply { text = encModeLabel() }
         encBtn.setOnClickListener {
-            val presets = listOf(Triple("sw", 320, 240), Triple("hw", 320, 240), Triple("hw", 256, 144), Triple("sw", 256, 144))
-            val cur = Triple(p.getString("encMode", "sw"), p.getInt("capW", 320), p.getInt("capH", 240))
-            val idx = presets.indexOfFirst { it.first == cur.first && it.second == cur.second && it.third == cur.third }
-            val next = presets[(idx + 1).mod(presets.size)]
-            p.edit().putString("encMode", next.first).putInt("capW", next.second).putInt("capH", next.third).apply()
+            val next = if ((p.getString("encMode", "sw") ?: "sw") == "sw") "hw" else "sw"
+            p.edit().putString("encMode", next).apply()
             encBtn.text = encModeLabel()
-            // The encoder factory is built in the service's onCreate, so fully restart the service to
-            // apply a new mode; projection is torn down, so the user re-grants with "Bật sẵn sàng".
-            stopService(Intent(this@MainActivity, RemoteAgentService::class.java))
-            encBtn.postDelayed({ startAgentService(null); refreshReady() }, 700)
-            toast("Đã đổi: ${next.first.uppercase()} ${next.second}×${next.third}. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
+            restartService(encBtn)
+            toast("Mã hoá: ${next.uppercase()}. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
         }
         root.addView(encBtn)
+        val qualBtn = Button(this).apply { text = qualityLabel() }
+        qualBtn.setOnClickListener {
+            // Max long-edge (px). Capture keeps device aspect ratio; higher = sharper but heavier.
+            val tiers = listOf(360, 480, 640, 960, 1280, 1920)
+            val cur = p.getInt("capMaxEdge", 640)
+            val next = tiers[((tiers.indexOf(cur).takeIf { it >= 0 } ?: tiers.indexOf(640)) + 1).mod(tiers.size)]
+            p.edit().putInt("capMaxEdge", next).apply()
+            qualBtn.text = qualityLabel()
+            restartService(qualBtn)
+            toast("Chất lượng tối đa: ${next}px. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
+        }
+        root.addView(qualBtn)
         root.addView(label("Điều khiển từ xa cần bật dịch vụ trợ năng VRemote."))
         accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
         root.addView(accessBtn)
@@ -225,9 +233,13 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Thông tin thiết bị (đã copy)").setView(ScrollView(this).apply { addView(tv) }).setPositiveButton("Đóng", null).show()
         toast("Đã copy — dán vào issue #144")
     }
-    private fun encModeLabel(): String {
-        val p = prefs(); val m = (p.getString("encMode", "sw") ?: "sw").uppercase()
-        return "Mã hoá: $m ${p.getInt("capW", 320)}×${p.getInt("capH", 240)} — bấm để đổi"
+    private fun encModeLabel(): String = "Mã hoá: ${(prefs().getString("encMode", "sw") ?: "sw").uppercase()} — bấm để đổi (SW/HW)"
+    private fun qualityLabel(): String = "Chất lượng: tối đa ${prefs().getInt("capMaxEdge", 640)}px — bấm để đổi"
+    /** The encoder factory + capture size are read when the service (re)starts, so fully restart it to
+     *  apply a new mode/quality. Projection is torn down → user re-grants with "Bật sẵn sàng". */
+    private fun restartService(v: android.view.View) {
+        stopService(Intent(this, RemoteAgentService::class.java))
+        v.postDelayed({ startAgentService(null); refreshReady() }, 700)
     }
     private fun label(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7280.toInt()); setPadding(0, 20, 0, 4) }
     private fun randomPw(n: Int = 6): String { val r = SecureRandom(); return (1..n).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("") }
