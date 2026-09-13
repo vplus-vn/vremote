@@ -91,6 +91,24 @@ class MainActivity : Activity() {
         readyBtn = Button(this).apply { text = "Bật sẵn sàng điều khiển (1 lần)"; setOnClickListener { startShare() } }
         root.addView(readyBtn)
         root.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
+        // Diagnostic: cycle encoder mode + capture size in-app so the combo that survives this box's
+        // video pipeline can be found without a rebuild. Each crash breadcrumb is tagged [mode WxH].
+        root.addView(label("Nếu app bị VĂNG khi kết nối: bấm đổi chế độ mã hoá rồi thử lại."))
+        val encBtn = Button(this).apply { text = encModeLabel() }
+        encBtn.setOnClickListener {
+            val presets = listOf(Triple("sw", 320, 240), Triple("hw", 320, 240), Triple("hw", 256, 144), Triple("sw", 256, 144))
+            val cur = Triple(p.getString("encMode", "sw"), p.getInt("capW", 320), p.getInt("capH", 240))
+            val idx = presets.indexOfFirst { it.first == cur.first && it.second == cur.second && it.third == cur.third }
+            val next = presets[(idx + 1).mod(presets.size)]
+            p.edit().putString("encMode", next.first).putInt("capW", next.second).putInt("capH", next.third).apply()
+            encBtn.text = encModeLabel()
+            // The encoder factory is built in the service's onCreate, so fully restart the service to
+            // apply a new mode; projection is torn down, so the user re-grants with "Bật sẵn sàng".
+            stopService(Intent(this@MainActivity, RemoteAgentService::class.java))
+            encBtn.postDelayed({ startAgentService(null); refreshReady() }, 700)
+            toast("Đã đổi: ${next.first.uppercase()} ${next.second}×${next.third}. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
+        }
+        root.addView(encBtn)
         root.addView(label("Điều khiển từ xa cần bật dịch vụ trợ năng VRemote."))
         accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
         root.addView(accessBtn)
@@ -195,6 +213,10 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun encModeLabel(): String {
+        val p = prefs(); val m = (p.getString("encMode", "sw") ?: "sw").uppercase()
+        return "Mã hoá: $m ${p.getInt("capW", 320)}×${p.getInt("capH", 240)} — bấm để đổi"
+    }
     private fun label(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7280.toInt()); setPadding(0, 20, 0, 4) }
     private fun randomPw(n: Int = 6): String { val r = SecureRandom(); return (1..n).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("") }
     private fun fmtId(id: String): String = id.replace(Regex("(\\d{3})(?=\\d)"), "$1 ").trim()
