@@ -103,6 +103,9 @@ function App(){
  const [devices,setDevices]=React.useState<Device[]>([]); const [error,setError]=React.useState(''); const [grant,setGrant]=React.useState<Grant|null>(null);
  const [showReg,setShowReg]=React.useState(false); const [enroll,setEnroll]=React.useState<Enroll|null>(null);
  const video=React.useRef<HTMLVideoElement>(null); const pc=React.useRef<RTCPeerConnection|null>(null); const ws=React.useRef<WebSocket|null>(null);
+ const dc=React.useRef<RTCDataChannel|null>(null); const [wantControl,setWantControl]=React.useState(false); const [controlSession,setControlSession]=React.useState(false); const [textVal,setTextVal]=React.useState('');
+ // Send one normalized input event to the agent over the 'input' data channel (no-op unless open).
+ const sendInput=React.useCallback((o:Record<string,unknown>)=>{const d=dc.current; if(d&&d.readyState==='open'){try{d.send(JSON.stringify(o))}catch{/* ignore */}}},[]);
 
  const authedFetch=React.useCallback(async(input:string,init?:RequestInit)=>{
   const headers=new Headers(init?.headers); if(token)headers.set('Authorization',`Bearer ${token}`);
@@ -155,11 +158,11 @@ function App(){
 
  // Connect to a device by its ID + password (UltraViewer/TeamViewer style). Waits for the
  // device to accept when it requires accept, then opens the view with the connect grant.
- async function connectById(pairingId:string,password:string){close(); setError('');
+ async function connectById(pairingId:string,password:string,capability:'view'|'control'='view'){close(); setError('');
   try{
    const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId,password})});
    const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
-   if(d.status==='ready'){await view(String(d.deviceId),String(d.connectGrant)); return;}
+   if(d.status==='ready'){await view(String(d.deviceId),String(d.connectGrant),capability); return;}
    // awaiting on-device accept — poll until ready / rejected / timeout.
    setError('Đang chờ thiết bị chấp nhận…');
    const deviceId=String(d.deviceId), requestId=String(d.requestId); const deadline=Date.now()+130000;
@@ -167,7 +170,7 @@ function App(){
     await new Promise(res=>setTimeout(res,1500));
     const pr=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}/connect/${encodeURIComponent(requestId)}`);
     const pd=await pr.json().catch(()=>({}));
-    if(pr.ok&&pd.status==='ready'){setError(''); await view(deviceId,String(pd.connectGrant)); return;}
+    if(pr.ok&&pd.status==='ready'){setError(''); await view(deviceId,String(pd.connectGrant),capability); return;}
     if(!pr.ok){throw Error(pd?.error?.message??'Thiết bị từ chối hoặc hết hạn.');}
    }
    throw Error('Hết thời gian chờ thiết bị chấp nhận.');
@@ -180,26 +183,49 @@ function App(){
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[token]);
 
+ // Mouse+keyboard remote control over the video (only active for a control session). Maps a
+ // Windows operator's mouse/keyboard to Android touch/keys via normalized coords on the input DC.
+ React.useEffect(()=>{
+  if(!grant||!controlSession)return; const v=video.current; if(!v)return;
+  v.tabIndex=0; (v.style as CSSStyleDeclaration).touchAction='none'; const ft=setTimeout(()=>{try{v.focus()}catch{/* ignore */}},0);
+  const clamp=(n:number)=>Math.min(1,Math.max(0,n));
+  // Normalize a client point into the letterboxed (object-fit:contain) video content box; null if outside.
+  const norm=(cx:number,cy:number):{x:number;y:number}|null=>{const r=v.getBoundingClientRect();const vw=v.videoWidth||0,vh=v.videoHeight||0;if(!vw||!vh||!r.width||!r.height)return null;const s=Math.min(r.width/vw,r.height/vh),dw=vw*s,dh=vh*s,ox=r.left+(r.width-dw)/2,oy=r.top+(r.height-dh)/2;const x=(cx-ox)/dw,y=(cy-oy)/dh;if(x<0||x>1||y<0||y>1)return null;return {x:clamp(x),y:clamp(y)};};
+  let start:{x:number;y:number;t:number}|null=null,moved=false,longTimer:ReturnType<typeof setTimeout>|null=null,lastWheel=0;
+  const down=(e:PointerEvent)=>{const c=norm(e.clientX,e.clientY);if(!c)return;try{v.focus()}catch{/* ignore */}start={...c,t:Date.now()};moved=false;try{v.setPointerCapture(e.pointerId)}catch{/* ignore */}if(longTimer)clearTimeout(longTimer);longTimer=setTimeout(()=>{if(start&&!moved){sendInput({t:'long',x:start.x,y:start.y});start=null;}},500);};
+  const move=(e:PointerEvent)=>{if(!start)return;const c=norm(e.clientX,e.clientY);if(!c)return;if(Math.abs(c.x-start.x)>0.02||Math.abs(c.y-start.y)>0.02)moved=true;};
+  const up=(e:PointerEvent)=>{if(longTimer){clearTimeout(longTimer);longTimer=null;}if(!start)return;const c=norm(e.clientX,e.clientY)||start;const dt=Date.now()-start.t;if(moved)sendInput({t:'swipe',x1:start.x,y1:start.y,x2:c.x,y2:c.y,ms:Math.min(2000,Math.max(50,dt))});else if(dt<500)sendInput({t:'tap',x:start.x,y:start.y});start=null;moved=false;};
+  const wheel=(e:WheelEvent)=>{e.preventDefault();const now=Date.now();if(now-lastWheel<60)return;lastWheel=now;const c=norm(e.clientX,e.clientY);if(!c)return;const dir=e.deltaY>0?1:-1;sendInput({t:'swipe',x1:c.x,y1:c.y,x2:c.x,y2:clamp(c.y-0.25*dir),ms:120});};
+  const ctx=(e:MouseEvent)=>{e.preventDefault();sendInput({t:'key',k:'back'});};
+  const key=(e:KeyboardEvent)=>{if(e.key==='Enter'){e.preventDefault();sendInput({t:'text',s:'\n'});}else if(e.key==='Backspace'){e.preventDefault();sendInput({t:'key',k:'del'});}else if(e.key==='Escape'){e.preventDefault();sendInput({t:'key',k:'back'});}else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();sendInput({t:'text',s:e.key});}};
+  v.addEventListener('pointerdown',down);v.addEventListener('pointermove',move);v.addEventListener('pointerup',up);v.addEventListener('pointercancel',up);
+  v.addEventListener('wheel',wheel,{passive:false});v.addEventListener('contextmenu',ctx);v.addEventListener('keydown',key);
+  return ()=>{clearTimeout(ft);if(longTimer)clearTimeout(longTimer);v.removeEventListener('pointerdown',down);v.removeEventListener('pointermove',move);v.removeEventListener('pointerup',up);v.removeEventListener('pointercancel',up);v.removeEventListener('wheel',wheel);v.removeEventListener('contextmenu',ctx);v.removeEventListener('keydown',key);};
+ },[grant,controlSession,sendInput]);
+
  // Row action. Pairing-managed devices (they have a pairingId) can only be viewed via the
  // ID+password connect flow — a direct grant-less session returns CONNECT_REQUIRED — so prompt
  // for the password and go through connectById instead of nuking the current session.
  async function viewRow(d:Device){
-  if(d.pairingId){const pw=window.prompt(`Nhập mật khẩu hiển thị trên máy ${d.pairingId} (VRemote Agent)`);if(pw)await connectById(String(d.pairingId),pw);return;}
-  await view(d.deviceId);
+  const cap:'view'|'control'=wantControl?'control':'view';
+  if(d.pairingId){const pw=window.prompt(`Nhập mật khẩu hiển thị trên máy ${d.pairingId} (VRemote Agent)`);if(pw)await connectById(String(d.pairingId),pw,cap);return;}
+  await view(d.deviceId,undefined,cap);
  }
- async function view(deviceId:string,connectGrant?:string){close(); setError(''); try{
-   const body:Record<string,unknown>={deviceId,capability:'view'}; if(connectGrant)body.connectGrant=connectGrant;
-   const r=await authedFetch('/api/vremote/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); if(!r.ok)throw Error(await r.text()); const g:Grant=await r.json(); setGrant(g);
+ async function view(deviceId:string,connectGrant?:string,capability:'view'|'control'='view'){close(); setError(''); try{
+   const body:Record<string,unknown>={deviceId,capability}; if(connectGrant)body.connectGrant=connectGrant;
+   const r=await authedFetch('/api/vremote/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); if(!r.ok)throw Error(await r.text()); const g:Grant=await r.json(); setGrant(g); setControlSession(capability==='control');
    const peer=new RTCPeerConnection({iceServers:iceSafe(g.iceServers)}); pc.current=peer; peer.ontrack=e=>{if(video.current)video.current.srcObject=e.streams[0]};
+   // Viewer is the offerer, so it owns the data channel; create it BEFORE the offer so it lands in the SDP.
+   if(capability==='control'){const d=peer.createDataChannel('input',{ordered:true}); dc.current=d;}
    const sock=new WebSocket(g.signalingUrl); ws.current=sock;
    sock.onopen=()=>sock.send(JSON.stringify({type:'join',sessionToken:g.sessionToken}));
    sock.onmessage=async e=>{const m=JSON.parse(e.data); if(m.type==='joined'){const offer=await peer.createOffer({offerToReceiveVideo:true}); await peer.setLocalDescription(offer); if(sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'offer',sessionId:g.sessionId,sdp:offer.sdp}));} else if(m.type==='answer'){await peer.setRemoteDescription({type:'answer',sdp:m.sdp});} else if(m.type==='candidate'&&m.candidate){await peer.addIceCandidate(m.candidate).catch(()=>{});} else if(m.type==='error'){setError(`Signaling: ${m.code}`)}};
    peer.onicecandidate=e=>{if(e.candidate&&sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'candidate',sessionId:g.sessionId,candidate:e.candidate.toJSON()}));};
  }catch(e){setError(e instanceof Error?e.message:String(e));}}
- function close(){const currentGrant=grant;if(ws.current){try{ws.current.close()}catch{}ws.current=null} if(pc.current){pc.current.close();pc.current=null} if(currentGrant){void authedFetch(`/api/vremote/v1/sessions/${currentGrant.sessionId}`,{method:'DELETE'}).catch(()=>{});setGrant(null)}}
+ function close(){const currentGrant=grant;if(dc.current){try{dc.current.close()}catch{}dc.current=null} if(ws.current){try{ws.current.close()}catch{}ws.current=null} if(pc.current){pc.current.close();pc.current=null} setControlSession(false); if(currentGrant){void authedFetch(`/api/vremote/v1/sessions/${currentGrant.sessionId}`,{method:'DELETE'}).catch(()=>{});setGrant(null)}}
 
  if(!token)return <Login onToken={t=>{setError(''); setToken(t);}}/>;
 
- return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href="/webagent.html" target="_blank" rel="noreferrer">Agent Web (máy này)</a><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><h2>Điều khiển máy khác</h2><p className="hint">Nhập ID và mật khẩu hiển thị trên máy cần xem (VRemote Agent).</p><ConnectByIdForm onConnect={(id,pw)=>void connectById(id,pw)}/></section><section><div className="section-head"><h2>Devices</h2><div className="section-actions"><button onClick={()=>void refresh()}>Tải lại</button><button className="ghost" onClick={()=>void cleanupOffline()}>Xóa máy offline</button><button className="primary" onClick={()=>{setEnroll(null); setShowReg(v=>!v);}}>{showReg?'Đóng':'+ Đăng ký thiết bị'}</button></div></div>{showReg&&<RegisterForm onSubmit={registerDevice} onCancel={()=>setShowReg(false)}/>}{enroll&&<EnrollBox enroll={enroll} onClose={()=>setEnroll(null)}/>}<table><thead><tr><th>ID</th><th>Device</th><th>Machine</th><th>Enrollment</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.pairingId??'—'}</td><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.enrollmentState??'—'}</td><td>{d.status}</td><td className="row-actions"><button disabled={d.status!=='online'} onClick={()=>void viewRow(d)}>View</button>{d.enrollmentState!=='ACTIVE'&&<button className="ghost" onClick={()=>void genEnroll(d.deviceId)}>Mã ghi danh</button>}<button className="ghost danger" onClick={()=>void deleteDevice(d.deviceId)}>Xóa</button></td></tr>)}{!devices.length&&<tr><td colSpan={6}>Chưa có thiết bị. Bấm “+ Đăng ký thiết bị” để thêm.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>;
+ return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href="/webagent.html" target="_blank" rel="noreferrer">Agent Web (máy này)</a><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><h2>Điều khiển máy khác</h2><p className="hint">Nhập ID và mật khẩu hiển thị trên máy cần xem (VRemote Agent).</p><label className="remember"><input type="checkbox" checked={wantControl} onChange={e=>setWantControl(e.target.checked)}/> Điều khiển (chuột + bàn phím)</label><ConnectByIdForm onConnect={(id,pw)=>void connectById(id,pw,wantControl?'control':'view')}/></section><section><div className="section-head"><h2>Devices</h2><div className="section-actions"><button onClick={()=>void refresh()}>Tải lại</button><button className="ghost" onClick={()=>void cleanupOffline()}>Xóa máy offline</button><button className="primary" onClick={()=>{setEnroll(null); setShowReg(v=>!v);}}>{showReg?'Đóng':'+ Đăng ký thiết bị'}</button></div></div>{showReg&&<RegisterForm onSubmit={registerDevice} onCancel={()=>setShowReg(false)}/>}{enroll&&<EnrollBox enroll={enroll} onClose={()=>setEnroll(null)}/>}<table><thead><tr><th>ID</th><th>Device</th><th>Machine</th><th>Enrollment</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.pairingId??'—'}</td><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.enrollmentState??'—'}</td><td>{d.status}</td><td className="row-actions"><button disabled={d.status!=='online'} onClick={()=>void viewRow(d)}>View</button>{d.enrollmentState!=='ACTIVE'&&<button className="ghost" onClick={()=>void genEnroll(d.deviceId)}>Mã ghi danh</button>}<button className="ghost danger" onClick={()=>void deleteDevice(d.deviceId)}>Xóa</button></td></tr>)}{!devices.length&&<tr><td colSpan={6}>Chưa có thiết bị. Bấm “+ Đăng ký thiết bị” để thêm.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div>{controlSession&&<p className="hint">Điều khiển: chuột trái = chạm/kéo, chuột phải = Back, con lăn = cuộn, gõ bàn phím để nhập (bấm vào màn hình để lấy focus).</p>}<video ref={video} autoPlay playsInline controls={false}/>{controlSession&&<div className="ctl-bar"><button onClick={()=>sendInput({t:'key',k:'back'})}>Back</button><button onClick={()=>sendInput({t:'key',k:'home'})}>Home</button><button onClick={()=>sendInput({t:'key',k:'recents'})}>Recents</button><input value={textVal} onChange={e=>setTextVal(e.target.value)} placeholder="Nhập văn bản" onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(textVal){sendInput({t:'text',s:textVal});setTextVal('')}}}}/><button onClick={()=>{if(textVal){sendInput({t:'text',s:textVal});setTextVal('')}}}>Gửi</button></div>}</section>}</main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
