@@ -138,6 +138,38 @@ final class DeviceController
     }
 
     /**
+     * Update an editable field of a device (currently just its display name / alias). Requires
+     * edge.admin.control. machineCode is the device's identity key (used to re-match on announce)
+     * and is intentionally NOT editable here.
+     */
+    public function update(Request $request, string $deviceId, DeviceRepository $devices, AuditRepository $audit): JsonResponse
+    {
+        if (($resp = $this->requirePermission($request, 'edge.admin.control')) !== null) {
+            return $resp;
+        }
+        $device = $devices->get($deviceId);
+        if ($device === null) {
+            return response()->json(['error' => ['code' => 'NOT_FOUND', 'message' => 'Device not found']], 404);
+        }
+        // Tenant scoping: a non-admin may only edit devices in their own tenant.
+        $ctx = $this->context($request);
+        if ($ctx !== null && ! in_array('*', $ctx->permissions, true) && $ctx->tenantId
+            && ($device['ownerTenantId'] ?? null) !== null && (string) $device['ownerTenantId'] !== (string) $ctx->tenantId) {
+            return $this->error('FORBIDDEN', 'device belongs to another tenant', 403);
+        }
+
+        $data = $request->validate(['name' => ['present', 'nullable', 'string', 'max:128']]);
+        $name = isset($data['name']) ? trim((string) $data['name']) : '';
+        $devices->update($deviceId, ['name' => $name !== '' ? $name : null]);
+        $audit->append([
+            'action' => 'DEVICE_UPDATE', 'deviceId' => $deviceId, 'tenantId' => $device['ownerTenantId'] ?? null,
+            'actor' => $this->actor($request), 'result' => 'renamed',
+        ]);
+
+        return response()->json($this->present(array_merge($device, ['name' => $name !== '' ? $name : null])));
+    }
+
+    /**
      * Public view of a device row — never leaks the device signing credential.
      *
      * @param array<string,mixed> $d
