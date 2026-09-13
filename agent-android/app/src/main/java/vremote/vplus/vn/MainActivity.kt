@@ -1,6 +1,9 @@
 package vremote.vplus.vn
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -114,6 +117,7 @@ class MainActivity : Activity() {
         root.addView(accessBtn)
         root.addView(Button(this).apply { text = "Bỏ giới hạn tiết kiệm pin (tuỳ chọn)"; setOnClickListener { openBatterySettings() } })
         root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
+        root.addView(Button(this).apply { text = "Thông tin thiết bị (gửi kỹ thuật)"; setOnClickListener { showDeviceInfo() } })
         root.addView(label("Sau khi khởi động lại máy, cần bật lại “sẵn sàng điều khiển” một lần."))
         status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 24, 0, 0) }
         root.addView(status)
@@ -213,6 +217,14 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Collect device + MediaCodec encoder capabilities, copy to clipboard, and show for screenshot/paste. */
+    private fun showDeviceInfo() {
+        val txt = try { DeviceInfo.report() } catch (e: Throwable) { "Lỗi thu thập: " + (e.message ?: e.toString()) }
+        try { (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("vremote-device", txt)) } catch (_: Throwable) {}
+        val tv = TextView(this).apply { text = txt; textSize = 11f; setTextIsSelectable(true); setPadding(32, 24, 32, 24) }
+        AlertDialog.Builder(this).setTitle("Thông tin thiết bị (đã copy)").setView(ScrollView(this).apply { addView(tv) }).setPositiveButton("Đóng", null).show()
+        toast("Đã copy — dán vào issue #144")
+    }
     private fun encModeLabel(): String {
         val p = prefs(); val m = (p.getString("encMode", "sw") ?: "sw").uppercase()
         return "Mã hoá: $m ${p.getInt("capW", 320)}×${p.getInt("capH", 240)} — bấm để đổi"
