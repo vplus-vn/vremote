@@ -133,6 +133,23 @@ function App(){
   }catch(e){setError(e instanceof Error?e.message:String(e));}
  }
 
+ // Delete a device row (cleanup / de-registration).
+ async function deleteDevice(deviceId:string){
+  if(!window.confirm(`Xóa thiết bị ${deviceId}? Không thể hoàn tác.`))return;
+  setError('');
+  try{const r=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}`,{method:'DELETE'}); if(!r.ok){const d=await r.json().catch(()=>({}));throw Error(d?.error?.message??`HTTP ${r.status}`);} await refresh();}
+  catch(e){setError(e instanceof Error?e.message:String(e));}
+ }
+ // Bulk-remove offline devices (e.g. leftover junk from the old ID-regeneration bug).
+ async function cleanupOffline(){
+  const offline=devices.filter(d=>d.status!=='online');
+  if(!offline.length){setError('Không có máy offline để xóa.');return;}
+  if(!window.confirm(`Xóa ${offline.length} thiết bị đang offline? Không thể hoàn tác.`))return;
+  setError('');
+  for(const d of offline){try{await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(d.deviceId)}`,{method:'DELETE'});}catch(e){/* skip */}}
+  await refresh();
+ }
+
  // Connect to a device by its ID + password (UltraViewer/TeamViewer style). Waits for the
  // device to accept when it requires accept, then opens the view with the connect grant.
  async function connectById(pairingId:string,password:string){close(); setError('');
@@ -173,6 +190,6 @@ function App(){
 
  if(!token)return <Login onToken={t=>{setError(''); setToken(t);}}/>;
 
- return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href="/webagent.html" target="_blank" rel="noreferrer">Agent Web (máy này)</a><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><h2>Điều khiển máy khác</h2><p className="hint">Nhập ID và mật khẩu hiển thị trên máy cần xem (VRemote Agent).</p><ConnectByIdForm onConnect={(id,pw)=>void connectById(id,pw)}/></section><section><div className="section-head"><h2>Devices</h2><div className="section-actions"><button onClick={()=>void refresh()}>Tải lại</button><button className="primary" onClick={()=>{setEnroll(null); setShowReg(v=>!v);}}>{showReg?'Đóng':'+ Đăng ký thiết bị'}</button></div></div>{showReg&&<RegisterForm onSubmit={registerDevice} onCancel={()=>setShowReg(false)}/>}{enroll&&<EnrollBox enroll={enroll} onClose={()=>setEnroll(null)}/>}<table><thead><tr><th>ID</th><th>Device</th><th>Machine</th><th>Enrollment</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.pairingId??'—'}</td><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.enrollmentState??'—'}</td><td>{d.status}</td><td className="row-actions"><button disabled={d.status!=='online'} onClick={()=>void view(d.deviceId)}>View</button>{d.enrollmentState!=='ACTIVE'&&<button className="ghost" onClick={()=>void genEnroll(d.deviceId)}>Mã ghi danh</button>}</td></tr>)}{!devices.length&&<tr><td colSpan={6}>Chưa có thiết bị. Bấm “+ Đăng ký thiết bị” để thêm.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>;
+ return <main><header><div><h1>VRemote</h1><span>Remote Edge Monitor</span></div><div className="header-actions"><a className="download" href="/webagent.html" target="_blank" rel="noreferrer">Agent Web (máy này)</a><a className="download" href={agentDownloadUrl}>Download Android Agent</a><button className="logout" onClick={logout}>Đăng xuất</button></div></header>{error&&<div className="error">{error}</div>}<section><h2>Điều khiển máy khác</h2><p className="hint">Nhập ID và mật khẩu hiển thị trên máy cần xem (VRemote Agent).</p><ConnectByIdForm onConnect={(id,pw)=>void connectById(id,pw)}/></section><section><div className="section-head"><h2>Devices</h2><div className="section-actions"><button onClick={()=>void refresh()}>Tải lại</button><button className="ghost" onClick={()=>void cleanupOffline()}>Xóa máy offline</button><button className="primary" onClick={()=>{setEnroll(null); setShowReg(v=>!v);}}>{showReg?'Đóng':'+ Đăng ký thiết bị'}</button></div></div>{showReg&&<RegisterForm onSubmit={registerDevice} onCancel={()=>setShowReg(false)}/>}{enroll&&<EnrollBox enroll={enroll} onClose={()=>setEnroll(null)}/>}<table><thead><tr><th>ID</th><th>Device</th><th>Machine</th><th>Enrollment</th><th>Status</th><th>Action</th></tr></thead><tbody>{devices.map(d=><tr key={d.deviceId}><td>{d.pairingId??'—'}</td><td>{d.deviceId}</td><td>{d.machineCode??'—'}</td><td>{d.enrollmentState??'—'}</td><td>{d.status}</td><td className="row-actions"><button disabled={d.status!=='online'} onClick={()=>void view(d.deviceId)}>View</button>{d.enrollmentState!=='ACTIVE'&&<button className="ghost" onClick={()=>void genEnroll(d.deviceId)}>Mã ghi danh</button>}<button className="ghost danger" onClick={()=>void deleteDevice(d.deviceId)}>Xóa</button></td></tr>)}{!devices.length&&<tr><td colSpan={6}>Chưa có thiết bị. Bấm “+ Đăng ký thiết bị” để thêm.</td></tr>}</tbody></table></section>{grant&&<section><div className="viewer-head"><h2>Session {grant.sessionId}</h2><button onClick={()=>close()}>Close</button></div><video ref={video} autoPlay playsInline controls={false}/></section>}</main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

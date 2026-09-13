@@ -65,6 +65,11 @@ final class MongoDeviceRepository implements DeviceRepository
         $this->table()->updateOrInsert(['_id' => $deviceId], ['deviceId' => $deviceId] + $fields);
     }
 
+    public function delete(string $deviceId): void
+    {
+        $this->table()->where('_id', $deviceId)->delete();
+    }
+
     /** @param array<string,mixed> $doc */
     private function hydrate(array $doc): array
     {

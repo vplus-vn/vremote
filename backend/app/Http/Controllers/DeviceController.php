@@ -111,6 +111,32 @@ final class DeviceController
         return response()->json($this->present($device), 201);
     }
 
+    /** Delete a device (cleanup / de-registration). Requires edge.admin.control. */
+    public function destroy(Request $request, string $deviceId, DeviceRepository $devices, AuditRepository $audit): JsonResponse
+    {
+        if (($resp = $this->requirePermission($request, 'edge.admin.control')) !== null) {
+            return $resp;
+        }
+        $device = $devices->get($deviceId);
+        if ($device === null) {
+            return response()->json(['error' => ['code' => 'NOT_FOUND', 'message' => 'Device not found']], 404);
+        }
+        // Tenant scoping: a non-admin may only delete devices in their own tenant.
+        $ctx = $this->context($request);
+        if ($ctx !== null && ! in_array('*', $ctx->permissions, true) && $ctx->tenantId
+            && ($device['ownerTenantId'] ?? null) !== null && (string) $device['ownerTenantId'] !== (string) $ctx->tenantId) {
+            return $this->error('FORBIDDEN', 'device belongs to another tenant', 403);
+        }
+
+        $devices->delete($deviceId);
+        $audit->append([
+            'action' => 'DEVICE_DELETE', 'deviceId' => $deviceId, 'tenantId' => $device['ownerTenantId'] ?? null,
+            'actor' => $this->actor($request), 'result' => 'deleted',
+        ]);
+
+        return response()->json(['deviceId' => $deviceId, 'deleted' => true]);
+    }
+
     /**
      * Public view of a device row — never leaks the device signing credential.
      *
