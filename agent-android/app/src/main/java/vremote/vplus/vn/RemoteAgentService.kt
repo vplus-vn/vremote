@@ -37,10 +37,12 @@ class RemoteAgentService : Service() {
     private var activeSession:String?=null; private var activeCapability:String?=null; private var activeIceServers:List<PeerConnection.IceServer> = emptyList(); private var inputChannel:DataChannel?=null; private var screenW=0; private var screenH=0; private var projectionIntent:Intent?=null; private var expiryTask:Runnable?=null; @Volatile private var destroyed=false; private var polling=false; private var shownRequest:String?=null; private val notifId=2; private val consentNotifId=3
     private val seenNonces=ConcurrentHashMap.newKeySet<String>(); private val processedCommands=ConcurrentHashMap.newKeySet<String>(); private val handler=Handler(Looper.getMainLooper())
     override fun onCreate(){super.onCreate();getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
-     // Force the SOFTWARE VP8/VP9 encoder. Many cheap Android TV boxes/tablets crash natively in
-     // their hardware MediaCodec encoder when it starts encoding a screen-capture surface (the app
-     // just dies as video begins). Software encoding is slower but robust and avoids the SIGSEGV.
-     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(SoftwareVideoEncoderFactory()).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
+     // Use the HARDWARE encoder (surface mode, sharing the capturer's EGL context). The software
+     // encoder crashed natively encoding the FIRST frame on this box — it needs a GPU->CPU texture
+     // readback (texture->I420) that the box's GL driver faults on. The HW encoder consumes the
+     // capturer's GPU surface directly (no readback), avoiding that crash. H264-high-profile HW
+     // (a common crasher) is disabled; SW remains as a fallback for unsupported codecs.
+     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext,true,false)).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int{
      if(intent?.action==ACTION_ACCEPT||intent?.action==ACTION_REJECT){respondPending(intent.getStringExtra(EXTRA_REQUEST_ID)?:"",intent.action==ACTION_ACCEPT);return START_STICKY}
      if(intent?.action==ACTION_STOP){stopProjection();return START_STICKY}
