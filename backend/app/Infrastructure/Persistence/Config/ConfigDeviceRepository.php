@@ -81,4 +81,9 @@ final class ConfigDeviceRepository implements DeviceRepository
     {
         // Read-only config store: persistence requires the Mongo repository.
     }
+
+    public function delete(string $deviceId): void
+    {
+        // Read-only config store: deletion requires the Mongo repository.
+    }
 }

@@ -24,7 +24,7 @@ class MainActivity : Activity() {
     private lateinit var personalInput: EditText
     private lateinit var requireAcceptBox: CheckBox
     private lateinit var status: TextView
-    private var sessionPw = randomPw()
+    private var sessionPw = ""
 
     private fun prefs() = getSharedPreferences("vremote", MODE_PRIVATE)
 
@@ -35,6 +35,8 @@ class MainActivity : Activity() {
             val aid = try { Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) } catch (e: Exception) { null }
             p.edit().putString("machineCode", "android-" + (aid ?: java.util.UUID.randomUUID().toString())).apply()
         }
+        // Session password is stable: generated once, reused every launch. Only "Đổi" changes it.
+        sessionPw = p.getString("sessionPw", "")?.takeIf { it.isNotEmpty() } ?: randomPw().also { p.edit().putString("sessionPw", it).apply() }
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 48, 32, 32) }
         root.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f })
@@ -52,7 +54,7 @@ class MainActivity : Activity() {
         val pwRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         pwView = TextView(this).apply { text = sessionPw; textSize = 26f; setTextColor(0xFF2563EB.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD) }
         pwRow.addView(pwView)
-        pwRow.addView(Button(this).apply { text = "Đổi"; setOnClickListener { sessionPw = randomPw(); pwView.text = sessionPw; announce() } })
+        pwRow.addView(Button(this).apply { text = "Đổi"; setOnClickListener { sessionPw = randomPw(); prefs().edit().putString("sessionPw", sessionPw).apply(); pwView.text = sessionPw; announce() } })
         root.addView(pwRow)
 
         root.addView(label("Mật khẩu riêng (unattended, tuỳ chọn)"))
@@ -62,7 +64,7 @@ class MainActivity : Activity() {
         perRow.addView(Button(this).apply { text = "Lưu"; setOnClickListener { prefs().edit().putString("personalPw", personalInput.text.toString()).apply(); announce(); toast("Đã lưu mật khẩu riêng") } })
         root.addView(perRow)
 
-        requireAcceptBox = CheckBox(this).apply { text = "Bắt buộc hỏi “Đồng ý” khi có người kết nối"; isChecked = p.getBoolean("requireAccept", true)
+        requireAcceptBox = CheckBox(this).apply { text = "Bắt buộc hỏi “Đồng ý” khi có người kết nối"; isChecked = p.getBoolean("requireAccept", false)
             setOnCheckedChangeListener { _, v -> prefs().edit().putBoolean("requireAccept", v).apply(); announce() } }
         root.addView(requireAcceptBox)
 

@@ -15,7 +15,7 @@ Route::get('/vremote/v1/agent/{deviceId}/pending',[PairingController::class,'pen
 Route::post('/vremote/v1/agent/{deviceId}/respond',[PairingController::class,'respond']);
 Route::post('/vremote/v1/agent/{deviceId}/policy',[PairingController::class,'policy']);
 Route::prefix('vremote/v1')->middleware('vremote.platform')->group(function (): void {
- Route::get('/devices',[DeviceController::class,'index']);Route::post('/devices',[DeviceController::class,'store']);Route::get('/devices/{deviceId}',[DeviceController::class,'show']);
+ Route::get('/devices',[DeviceController::class,'index']);Route::post('/devices',[DeviceController::class,'store']);Route::get('/devices/{deviceId}',[DeviceController::class,'show']);Route::delete('/devices/{deviceId}',[DeviceController::class,'destroy']);
  Route::post('/devices/connect',[PairingController::class,'connect']);Route::get('/devices/{deviceId}/connect/{requestId}',[PairingController::class,'connectStatus']);
  Route::post('/sessions',[SessionController::class,'store']);Route::delete('/sessions/{sessionId}',[SessionController::class,'destroy']);
  Route::post('/devices/{deviceId}/commands',[CommandController::class,'store']);Route::get('/audit',[AuditController::class,'index']);Route::post('/integrations/sessions',[IntegrationController::class,'store']);

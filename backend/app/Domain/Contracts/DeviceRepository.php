@@ -30,4 +30,7 @@ interface DeviceRepository
 
     /** @param array<string,mixed> $fields */
     public function update(string $deviceId, array $fields): void;
+
+    /** Permanently remove a device row (cleanup / de-registration). */
+    public function delete(string $deviceId): void;
 }

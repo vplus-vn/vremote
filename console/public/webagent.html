@@ -61,13 +61,17 @@ function setStatus(t,err){const s=$('status');s.textContent=t;s.className='statu
 // Stable per-browser machine code + persisted settings.
 function machineCode(){let m=LS.getItem('vremote.machineCode');if(!m){m='web-'+(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));LS.setItem('vremote.machineCode',m)}return m;}
 function personalPw(){return LS.getItem('vremote.personalPw')||''}
-function requireAccept(){return LS.getItem('vremote.requireAccept')!=='false'}
+// Accept is OFF by default — only when the box is ticked does a connect need on-device approval.
+function requireAccept(){return LS.getItem('vremote.requireAccept')==='true'}
 function randomPw(n=6){const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';const r=crypto.getRandomValues(new Uint32Array(n));for(let i=0;i<n;i++)s+=a[r[i]%a.length];return s;}
+// Session password is STABLE: generated once, persisted, reused every launch. Only "Đổi"
+// changes it — it never auto-rotates on reload or on other actions.
+function loadSessionPw(){let s=LS.getItem('vremote.sessionPw');if(!s){s=randomPw();try{LS.setItem('vremote.sessionPw',s)}catch(e){}}return s;}
 async function sha256hex(str){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function fmtId(id){return String(id).replace(/(\d{3})(?=\d)/g,'$1 ').trim();}
 
-let sessionPw=randomPw();
-let state={deviceId:LS.getItem('vremote.deviceId')||'',deviceToken:LS.getItem('vremote.deviceToken')||'',pairingId:''};
+let sessionPw=loadSessionPw();
+let state={deviceId:LS.getItem('vremote.deviceId')||'',deviceToken:LS.getItem('vremote.deviceToken')||'',pairingId:LS.getItem('vremote.pairingId')||''};
 let stream=null,ws=null,pollTimer=null,pendingReq=null;
 const peers=new Map(); // sessionId -> RTCPeerConnection
 const ICE=[{urls:'stun:stun.l.google.com:19302'}];
@@ -79,7 +83,7 @@ async function announce(){
  const r=await fetch(API+'/agent/announce',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
  const d=await r.json().catch(()=>({})); if(!r.ok)throw new Error(d?.error?.message||('HTTP '+r.status));
  state.deviceId=d.deviceId; state.deviceToken=d.deviceToken; state.pairingId=d.pairingId;
- LS.setItem('vremote.deviceId',d.deviceId); LS.setItem('vremote.deviceToken',d.deviceToken);
+ LS.setItem('vremote.deviceId',d.deviceId); LS.setItem('vremote.deviceToken',d.deviceToken); LS.setItem('vremote.pairingId',d.pairingId);
  $('pairingId').textContent=fmtId(d.pairingId); $('sessionPw').textContent=sessionPw;
 }
 
@@ -142,7 +146,7 @@ async function respond(accept){if(!pendingReq)return;const req=pendingReq.reques
 // wire up
 $('startBtn').onclick=startShare;
 $('stopBtn').onclick=stopShare;
-$('refreshPw').onclick=async()=>{sessionPw=randomPw();$('sessionPw').textContent=sessionPw;if(stream){try{await announce()}catch(e){setStatus(String(e),true)}}};
+$('refreshPw').onclick=async()=>{sessionPw=randomPw();try{LS.setItem('vremote.sessionPw',sessionPw)}catch(e){}$('sessionPw').textContent=sessionPw;if(stream){try{await announce()}catch(e){setStatus(String(e),true)}}};
 $('acceptYes').onclick=()=>respond(true);
 $('acceptNo').onclick=()=>respond(false);
 $('personalPw').value=personalPw();
@@ -150,6 +154,7 @@ $('requireAccept').checked=requireAccept();
 $('savePersonal').onclick=async()=>{LS.setItem('vremote.personalPw',$('personalPw').value);if(stream){try{await announce()}catch(e){}}setStatus('Đã lưu mật khẩu riêng.');};
 $('requireAccept').onchange=async()=>{LS.setItem('vremote.requireAccept',$('requireAccept').checked?'true':'false');if(stream){try{await announce()}catch(e){}}};
 $('sessionPw').textContent=sessionPw;
+if(state.pairingId)$('pairingId').textContent=fmtId(state.pairingId);
 setStatus('Chưa chia sẻ. Bấm “Bắt đầu chia sẻ màn hình”.');
 </script>
 </body>
