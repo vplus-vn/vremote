@@ -4,10 +4,15 @@
 # The deploy workflow restarts this unit after each release symlink flip.
 #
 # Prerequisites:
-#   - system user `vremote` (adduser --system --group --no-create-home vremote)
 #   - Node.js runtime on PATH (adjust ExecStart if node lives elsewhere)
-#   - <deploy>/shared/signaling.env populated from signaling/.env.example
 #   - the release ships signaling/{dist,node_modules,package.json}
+#   - runs as www-data (already present, unprivileged) — no dedicated user needed
+#
+# Config: the backend .env is the SINGLE SOURCE OF TRUTH. The signaling service reads it
+# directly (Mongo connection + the shared VREMOTE_SESSION_SECRET / _SIGNALING_INTERNAL_SECRET)
+# and resolves Laravel-style ${SERVICES} itself. shared/signaling.env is an OPTIONAL override
+# (e.g. custom PORT/INTERNAL_PORT); it may be absent. Ensure the backend .env is group-readable
+# by www-data (chown vdeploy:www-data .env; chmod 640).
 
 [Unit]
 Description=VRemote signaling service
@@ -15,10 +20,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=vremote
-Group=vremote
+User=www-data
+Group=www-data
 WorkingDirectory=/var/www/vremote.vplus.vn/current/signaling
-EnvironmentFile=/var/www/vremote.vplus.vn/shared/signaling.env
+EnvironmentFile=/var/www/vremote.vplus.vn/shared/.env
+EnvironmentFile=-/var/www/vremote.vplus.vn/shared/signaling.env
 ExecStart=/usr/bin/node dist/server.js
 Restart=always
 RestartSec=3

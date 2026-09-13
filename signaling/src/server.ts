@@ -12,13 +12,18 @@ const devices:Record<string,{deviceToken?:string}>=JSON.parse(process.env.VREMOT
 // When MONGODB_* is configured, an agent's deviceToken is verified against the shared registry,
 // so devices provisioned by enrollment or by device-initiated pairing can connect. Without it,
 // only the static VREMOTE_DEVICES_JSON map is used (unchanged baseline behavior).
-const mongoDb=process.env.MONGODB_DATABASE??process.env.SERVICES??'vremote';
+// Resolve Laravel-style ${SERVICES} interpolation so the signaling service can read the
+// SAME backend .env directly (single source of truth), where MONGODB_DATABASE etc. are
+// written as "${SERVICES}". systemd/Node don't expand ${...}; we do it here.
+const SVC=process.env.SERVICES??'vremote';
+const sub=(v?:string)=>(v??'').replace(/\$\{SERVICES\}/g,SVC);
+const mongoDb=sub(process.env.MONGODB_DATABASE)||SVC;
 function mongoUri():string|null{
  if(process.env.MONGODB_URI)return process.env.MONGODB_URI;
  const host=process.env.MONGODB_HOST; if(!host)return null;
  const port=process.env.MONGODB_PORT??'27017';
- const user=process.env.MONGODB_USERNAME, pass=process.env.MONGODB_PASSWORD;
- const authDb=process.env.MONGODB_AUTHENTICATION_DATABASE??mongoDb;
+ const user=sub(process.env.MONGODB_USERNAME)||'', pass=process.env.MONGODB_PASSWORD;
+ const authDb=sub(process.env.MONGODB_AUTHENTICATION_DATABASE)||mongoDb;
  const cred=user?`${encodeURIComponent(user)}:${encodeURIComponent(pass??'')}@`:'';
  const auth=user?`?authSource=${encodeURIComponent(authDb)}`:'';
  return `mongodb://${cred}${host}:${port}/${encodeURIComponent(mongoDb)}${auth}`;
