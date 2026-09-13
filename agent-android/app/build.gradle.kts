@@ -9,6 +9,25 @@ android { namespace = "vremote.vplus.vn"; compileSdk = 35
     // Java and Kotlin must target the same JVM level or the Kotlin plugin fails the build
     // ("Inconsistent JVM-target compatibility"). Pin both to 17.
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    // Stable release signing (so the in-app updater can install over the top — an update only
+    // installs if the new APK's signature matches the installed one). CI decodes a keystore secret
+    // to ANDROID_KEYSTORE_FILE and builds `assembleRelease`; without the secret it stays unset and
+    // CI builds `assembleDebug` instead (ephemeral debug key — updates then require a reinstall).
+    signingConfigs {
+        create("release") {
+            val ks = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (ks != null && file(ks).exists()) {
+                storeFile = file(ks); storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS"); keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (System.getenv("ANDROID_KEYSTORE_FILE") != null) signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
