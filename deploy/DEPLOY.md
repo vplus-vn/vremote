@@ -72,16 +72,13 @@ App secrets (session/signaling/TURN secrets, DB password, VPlus keys) live **onl
 ## Server prerequisites (one-time)
 
 1. Packages: `nginx`, `php8.3-fpm` + `php8.3-mongodb`, Node.js (for signaling), MongoDB (or reachable), `coturn`, `rsync`.
-2. Deploy user (e.g. `deploy`) + a `vremote` system user for the signaling service:
-   ```bash
-   sudo adduser --system --group --no-create-home vremote
-   ```
+2. Deploy user `vdeploy`. The signaling service runs as **`www-data`** (already present, unprivileged) — no dedicated user needed.
 3. Directory + ownership:
    ```bash
    sudo mkdir -p /var/www/vremote.vplus.vn/{releases,shared/downloads,shared/backend-storage}
-   sudo chown -R deploy:deploy /var/www/vremote.vplus.vn
+   sudo chown -R vdeploy:vdeploy /var/www/vremote.vplus.vn
    ```
-4. Create `shared/.env` from `backend/.env.example` and `shared/signaling.env` from `signaling/.env.example` (fill real secrets; matching `VREMOTE_SESSION_SECRET` and `VREMOTE_SIGNALING_INTERNAL_SECRET` on both).
+4. Create `shared/.env` from `backend/.env.example` (fill real secrets). This is the **single source of truth** — the signaling service reads it directly for the Mongo connection and the shared `VREMOTE_SESSION_SECRET` / `VREMOTE_SIGNALING_INTERNAL_SECRET`, resolving `${SERVICES}` itself. Make it group-readable by www-data: `chown vdeploy:www-data shared/.env && chmod 640 shared/.env`. `shared/signaling.env` is OPTIONAL (only for overrides like a custom `PORT`).
 5. nginx: install `deploy/nginx/vremote.vplus.vn.conf`, provision TLS (certbot), enable the site.
 6. systemd: install `deploy/systemd/vremote-signaling.service`, then `sudo systemctl enable --now vremote-signaling`.
 7. Grant the deploy user NOPASSWD sudo for exactly the reload commands used by the workflow:
