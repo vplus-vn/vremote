@@ -1,4 +1,4 @@
-package vn.vremote
+package vremote.vplus.vn
 
 import android.util.Base64
 import java.nio.charset.StandardCharsets

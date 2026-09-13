@@ -1,4 +1,4 @@
-package vn.vremote
+package vremote.vplus.vn
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

@@ -1,4 +1,4 @@
-package vn.vremote
+package vremote.vplus.vn
 
 import android.content.Context
 import android.content.Intent
