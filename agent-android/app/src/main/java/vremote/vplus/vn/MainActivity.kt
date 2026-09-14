@@ -175,7 +175,7 @@ class MainActivity : Activity() {
                 // Upload diagnostics so support can read the box's codec caps + last crash point in the
                 // console without the tester pasting anything (helps pin the first-frame encode crash).
                 val di = try { DeviceInfo.report() } catch (_: Throwable) { "" }
-                val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
+                val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | flow=" + (p.getString("flow", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
                 val a = ApiClient.announce(base, machineCode, ApiClient.sha256(sessionPw), if (personal.isNotEmpty()) ApiClient.sha256(personal) else "", requireAccept, di, ev)
                 p.edit().putString("deviceId", a.deviceId).putString("deviceToken", a.deviceToken)
                     .putString("pairingId", a.pairingId).putString("signalingUrl", ApiClient.signalingUrl(base)).apply()
