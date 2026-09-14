@@ -31,6 +31,9 @@ class MainActivity : Activity() {
     private lateinit var accessBtn: Button
     private lateinit var readyBtn: Button
     private var sessionPw = ""
+    // Auto-arm screen share once per launch (see maybeAutoShare). Android security forbids a silent
+    // grant across restarts, so the best we can do is pop the system dialog automatically on open.
+    private var autoSharePrompted = false
 
     private fun prefs() = getSharedPreferences("vremote", MODE_PRIVATE)
 
@@ -52,86 +55,107 @@ class MainActivity : Activity() {
         // Session password is stable: generated once, reused every launch. Only "Đổi" changes it.
         sessionPw = p.getString("sessionPw", "")?.takeIf { it.isNotEmpty() } ?: randomPw().also { p.edit().putString("sessionPw", it).apply() }
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 48, 32, 32) }
-        root.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f })
-        root.addView(TextView(this).apply { text = "Chia sẻ màn hình thiết bị này"; setTextColor(0xFF6B7280.toInt()) })
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 40, 32, 32) }
+        // Header: app name (left) + version badge in the top corner, so the running build is obvious.
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        header.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f; setTypeface(typeface, android.graphics.Typeface.BOLD); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+        header.addView(TextView(this).apply { text = "v" + BuildConfig.VERSION_NAME; textSize = 16f; setTextColor(0xFF2563EB.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD) })
+        root.addView(header)
+        root.addView(TextView(this).apply { text = "Chia sẻ màn hình thiết bị này"; setTextColor(0xFF6B7280.toInt()); setPadding(0, 2, 0, 0) })
 
+        // Crash diagnostics only appear when set (small, so they don't clutter the normal screen).
         p.getString("prevCrumb", "")?.takeIf { it.isNotEmpty() }?.let { pc ->
-            root.addView(TextView(this).apply { text = "🔎 Bước cuối lần chạy trước (nghi crash): $pc — chụp gửi kỹ thuật"; setTextColor(0xFFB91C1C.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
-        }
-        p.getString("crumb", "")?.takeIf { it.isNotEmpty() }?.let { cr ->
-            root.addView(TextView(this).apply { text = "🔎 Bước cuối phiên này: $cr — chụp gửi kỹ thuật"; setTextColor(0xFF2563EB.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
+            root.addView(TextView(this).apply { text = "🔎 Bước cuối lần chạy trước (nghi crash): $pc"; setTextColor(0xFFB91C1C.toInt()); textSize = 12f; setPadding(0, 12, 0, 2) })
         }
         p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let { c ->
-            root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước — chụp gửi kỹ thuật:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 16, 0, 8) })
-            root.addView(Button(this).apply { text = "Xoá thông báo lỗi"; setOnClickListener { p.edit().remove("lastCrash").apply(); recreate() } })
+            root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 6, 0, 2) })
         }
 
-        root.addView(label("Máy chủ (Base URL)"))
-        baseUrlInput = EditText(this).apply { setText(p.getString("baseUrl", "https://vremote.vplus.vn")); inputType = InputType.TYPE_TEXT_VARIATION_URI }
-        root.addView(baseUrlInput)
-
+        // ── Essentials (always visible) ─────────────────────────────────────────────
         root.addView(label("ID của bạn"))
         idView = TextView(this).apply { text = "…"; textSize = 30f; setTypeface(typeface, android.graphics.Typeface.BOLD) }
         root.addView(idView)
 
         root.addView(label("Mật khẩu (phiên)"))
         val pwRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        pwView = TextView(this).apply { text = sessionPw; textSize = 26f; setTextColor(0xFF2563EB.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD) }
+        pwView = TextView(this).apply { text = sessionPw; textSize = 26f; setTextColor(0xFF2563EB.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
         pwRow.addView(pwView)
         pwRow.addView(Button(this).apply { text = "Đổi"; setOnClickListener { sessionPw = randomPw(); prefs().edit().putString("sessionPw", sessionPw).apply(); pwView.text = sessionPw; announce() } })
         root.addView(pwRow)
 
-        root.addView(label("Mật khẩu riêng (unattended, tuỳ chọn)"))
+        // The primary action. Screen share is auto-armed on launch (maybeAutoShare); this button lets the
+        // user (re)grant on demand or after "Dừng chia sẻ".
+        readyBtn = Button(this).apply { text = "Bật sẵn sàng chia sẻ"; setOnClickListener { startShare() } }
+        root.addView(readyBtn)
+        status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 12, 0, 4) }
+        root.addView(status)
+
+        // Accessibility is required for remote CONTROL (taps/swipes), so keep it one tap away.
+        accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
+        root.addView(accessBtn)
+        root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
+
+        // ── Advanced (collapsed) ────────────────────────────────────────────────────
+        // Everything technical is tucked away so the main screen stays uncluttered.
+        val advanced = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = android.view.View.GONE }
+        val advToggle = Button(this).apply { text = "⚙ Nâng cao ▾"; setPadding(0, 8, 0, 8) }
+        advToggle.setOnClickListener {
+            val show = advanced.visibility != android.view.View.VISIBLE
+            advanced.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+            advToggle.text = if (show) "⚙ Nâng cao ▴" else "⚙ Nâng cao ▾"
+        }
+        root.addView(advToggle)
+        root.addView(advanced)
+
+        val autoShareBox = CheckBox(this).apply { text = "Tự động hỏi chia sẻ khi mở app"; isChecked = p.getBoolean("autoShare", true)
+            setOnCheckedChangeListener { _, v -> prefs().edit().putBoolean("autoShare", v).apply() } }
+        advanced.addView(autoShareBox)
+
+        advanced.addView(label("Máy chủ (Base URL)"))
+        baseUrlInput = EditText(this).apply { setText(p.getString("baseUrl", "https://vremote.vplus.vn")); inputType = InputType.TYPE_TEXT_VARIATION_URI }
+        advanced.addView(baseUrlInput)
+
+        advanced.addView(label("Mật khẩu riêng (unattended, tuỳ chọn)"))
         val perRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         personalInput = EditText(this).apply { setText(p.getString("personalPw", "")); hint = "để trống = không dùng"; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
         perRow.addView(personalInput)
         perRow.addView(Button(this).apply { text = "Lưu"; setOnClickListener { prefs().edit().putString("personalPw", personalInput.text.toString()).apply(); announce(); toast("Đã lưu mật khẩu riêng") } })
-        root.addView(perRow)
+        advanced.addView(perRow)
 
         requireAcceptBox = CheckBox(this).apply { text = "Bắt buộc hỏi “Đồng ý” khi có người kết nối"; isChecked = p.getBoolean("requireAccept", false)
             setOnCheckedChangeListener { _, v -> prefs().edit().putBoolean("requireAccept", v).apply(); announce() } }
-        root.addView(requireAcceptBox)
+        advanced.addView(requireAcceptBox)
 
-        root.addView(label("Chỉ cần bật MỘT LẦN. Sau đó console kết nối được mà không cần chạm máy."))
-        readyBtn = Button(this).apply { text = "Bật sẵn sàng điều khiển (1 lần)"; setOnClickListener { startShare() } }
-        root.addView(readyBtn)
-        root.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
-        // Encoder mode + capture quality are adjustable in-app so a weak box can be tuned down (or a
-        // stuck video pipeline switched sw<->hw) WITHOUT a rebuild. Capture keeps the DEVICE'S OWN screen
-        // aspect ratio + resolution (just downscaled to the chosen quality), so it stays correct across
-        // many devices. Each crash breadcrumb is tagged [mode WxH qN].
-        root.addView(label("Nếu app bị VĂNG hoặc lag khi kết nối: đổi chế độ mã hoá / hạ chất lượng rồi thử lại."))
+        advanced.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
+        // Encoder mode + capture quality are adjustable in-app so a weak box can be tuned WITHOUT a rebuild.
+        advanced.addView(label("Nếu app bị VĂNG hoặc lag khi kết nối: đổi chế độ mã hoá / hạ chất lượng rồi thử lại."))
         val encBtn = Button(this).apply { text = encModeLabel() }
         encBtn.setOnClickListener {
-            val next = if ((p.getString("encMode", "sw") ?: "sw") == "sw") "hw" else "sw"
-            p.edit().putString("encMode", next).apply()
+            val next = if ((prefs().getString("encMode", "hw") ?: "hw") == "sw") "hw" else "sw"
+            prefs().edit().putString("encMode", next).apply()
             encBtn.text = encModeLabel()
             restartService(encBtn)
-            toast("Mã hoá: ${next.uppercase()}. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
+            toast("Mã hoá: ${next.uppercase()}. Sẽ tự bật lại chia sẻ.")
         }
-        root.addView(encBtn)
+        advanced.addView(encBtn)
         val qualBtn = Button(this).apply { text = qualityLabel() }
         qualBtn.setOnClickListener {
             // Max long-edge (px). Capture keeps device aspect ratio; higher = sharper but heavier.
             val tiers = listOf(360, 480, 640, 960, 1280, 1920)
-            val cur = p.getInt("capMaxEdge", 640)
+            val cur = prefs().getInt("capMaxEdge", 640)
             val next = tiers[((tiers.indexOf(cur).takeIf { it >= 0 } ?: tiers.indexOf(640)) + 1).mod(tiers.size)]
-            p.edit().putInt("capMaxEdge", next).apply()
+            prefs().edit().putInt("capMaxEdge", next).apply()
             qualBtn.text = qualityLabel()
             restartService(qualBtn)
-            toast("Chất lượng tối đa: ${next}px. Bấm “Bật sẵn sàng điều khiển” rồi kết nối lại.")
+            toast("Chất lượng tối đa: ${next}px. Sẽ tự bật lại chia sẻ.")
         }
-        root.addView(qualBtn)
-        root.addView(label("Điều khiển từ xa cần bật dịch vụ trợ năng VRemote."))
-        accessBtn = Button(this).apply { text = "Cho phép điều khiển (Accessibility)"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
-        root.addView(accessBtn)
-        root.addView(Button(this).apply { text = "Bỏ giới hạn tiết kiệm pin (tuỳ chọn)"; setOnClickListener { openBatterySettings() } })
-        root.addView(Button(this).apply { text = "Cập nhật bản mới nhất"; setOnClickListener { checkForUpdate() } })
-        root.addView(Button(this).apply { text = "Thông tin thiết bị (gửi kỹ thuật)"; setOnClickListener { showDeviceInfo() } })
-        root.addView(label("Sau khi khởi động lại máy, cần bật lại “sẵn sàng điều khiển” một lần."))
-        status = TextView(this).apply { text = "Đang lấy ID…"; setPadding(0, 24, 0, 0) }
-        root.addView(status)
+        advanced.addView(qualBtn)
+        advanced.addView(Button(this).apply { text = "Bỏ giới hạn tiết kiệm pin (tuỳ chọn)"; setOnClickListener { openBatterySettings() } })
+        advanced.addView(Button(this).apply { text = "Thông tin thiết bị (gửi kỹ thuật)"; setOnClickListener { showDeviceInfo() } })
+        p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let {
+            advanced.addView(Button(this).apply { text = "Xoá thông báo lỗi"; setOnClickListener { prefs().edit().remove("lastCrash").apply(); recreate() } })
+        }
+        advanced.addView(label("Sau khi khởi động lại máy, mở app là tự hỏi chia sẻ (bấm “Bắt đầu ngay”)."))
 
         setContentView(ScrollView(this).apply { addView(root) })
         announce()
@@ -143,7 +167,7 @@ class MainActivity : Activity() {
     private fun refreshReady() {
         if (::accessBtn.isInitialized) accessBtn.text = if (VRemoteInputService.isEnabled()) "Đã bật điều khiển ✓" else "Cho phép điều khiển (Accessibility)"
         val held = RemoteAgentService.projectionHeld
-        if (::readyBtn.isInitialized) readyBtn.text = if (held) "Sẵn sàng chia sẻ ✓ (đã cho phép)" else "Bật sẵn sàng điều khiển (1 lần)"
+        if (::readyBtn.isInitialized) readyBtn.text = if (held) "Sẵn sàng chia sẻ ✓ (đã cho phép)" else "Bật sẵn sàng chia sẻ"
         if (::status.isInitialized) {
             if (held) { status.text = "Sẵn sàng nhận điều khiển ✓"; status.setTextColor(0xFF16A34A.toInt()) }
             else { status.text = "Đang nhận kết nối. Bật “sẵn sàng điều khiển” 1 lần để cho phép chạm/vuốt."; status.setTextColor(0xFF6B7280.toInt()) }
@@ -181,7 +205,7 @@ class MainActivity : Activity() {
                     .putString("pairingId", a.pairingId).putString("signalingUrl", ApiClient.signalingUrl(base)).apply()
                 // Start the service the moment we have creds so signaling connects and the device is
                 // reachable WITHOUT pressing share. Projection (video) is enabled separately, one-time.
-                runOnUiThread { idView.text = fmtId(a.pairingId); startAgentService(null); refreshReady() }
+                runOnUiThread { idView.text = fmtId(a.pairingId); startAgentService(null); refreshReady(); maybeAutoShare() }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "Lỗi kết nối máy chủ: " + (e.message ?: e.toString()) }
             }
@@ -220,7 +244,22 @@ class MainActivity : Activity() {
     private fun startShare() {
         if ((prefs().getString("deviceId", "") ?: "").isEmpty()) { announce(); toast("Đang lấy ID, thử lại sau giây lát"); return }
         val mpm = getSystemService(MediaProjectionManager::class.java)
-        startActivityForResult(mpm.createScreenCaptureIntent(), requestCode)
+        try { startActivityForResult(mpm.createScreenCaptureIntent(), requestCode) } catch (_: Throwable) {}
+    }
+
+    /**
+     * Auto-arm screen share once per launch. Android forbids a silent MediaProjection grant across
+     * restarts (each new capture session needs a fresh user tap), so the friendliest behaviour is to
+     * pop the system dialog automatically on open — the user just taps "Bắt đầu ngay" once. Opt out via
+     * the "Tự động hỏi chia sẻ khi mở app" checkbox. Called after announce() has creds so the ID exists.
+     */
+    private fun maybeAutoShare() {
+        if (autoSharePrompted) return
+        if (!prefs().getBoolean("autoShare", true)) return
+        if (RemoteAgentService.projectionHeld) return
+        if ((prefs().getString("deviceId", "") ?: "").isEmpty()) return
+        autoSharePrompted = true
+        startShare()
     }
 
     @Deprecated("Android callback API")
@@ -238,15 +277,16 @@ class MainActivity : Activity() {
         try { (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("vremote-device", txt)) } catch (_: Throwable) {}
         val tv = TextView(this).apply { text = txt; textSize = 11f; setTextIsSelectable(true); setPadding(32, 24, 32, 24) }
         AlertDialog.Builder(this).setTitle("Thông tin thiết bị (đã copy)").setView(ScrollView(this).apply { addView(tv) }).setPositiveButton("Đóng", null).show()
-        toast("Đã copy — dán vào issue #144")
+        toast("Đã copy — gửi kỹ thuật")
     }
-    private fun encModeLabel(): String = "Mã hoá: ${(prefs().getString("encMode", "sw") ?: "sw").uppercase()} — bấm để đổi (SW/HW)"
+    private fun encModeLabel(): String = "Mã hoá: ${(prefs().getString("encMode", "hw") ?: "hw").uppercase()} — bấm để đổi (SW/HW)"
     private fun qualityLabel(): String = "Chất lượng: tối đa ${prefs().getInt("capMaxEdge", 640)}px — bấm để đổi"
     /** The encoder factory + capture size are read when the service (re)starts, so fully restart it to
      *  apply a new mode/quality. Projection is torn down → user re-grants with "Bật sẵn sàng". */
     private fun restartService(v: android.view.View) {
         stopService(Intent(this, RemoteAgentService::class.java))
-        v.postDelayed({ startAgentService(null); refreshReady() }, 700)
+        autoSharePrompted = false // re-arm so the encoder/quality change re-pops the share dialog
+        v.postDelayed({ startAgentService(null); refreshReady(); maybeAutoShare() }, 700)
     }
     private fun label(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7280.toInt()); setPadding(0, 20, 0, 4) }
     private fun randomPw(n: Int = 6): String { val r = SecureRandom(); return (1..n).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("") }
