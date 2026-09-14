@@ -58,7 +58,9 @@ class RemoteAgentService : Service() {
      val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","sw")?:"sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
      val encoderFactory:VideoEncoderFactory=if(encMode=="hw")DefaultVideoEncoderFactory(egl.eglBaseContext,true,false) else SoftwareVideoEncoderFactory()
      crumb("factory ${cfg()}")
-     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(encoderFactory).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
+     // Wrap the encoder factory so a breadcrumb records WHICH encoder WebRTC picks and that creation
+     // was reached — pinpoints, on the next crash, whether it dies before/at/after encoder creation.
+     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(DiagEncoderFactory(encoderFactory){s->crumb(s)}).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int{
      if(intent?.action==ACTION_ACCEPT||intent?.action==ACTION_REJECT){respondPending(intent.getStringExtra(EXTRA_REQUEST_ID)?:"",intent.action==ACTION_ACCEPT);return START_STICKY}
      if(intent?.action==ACTION_STOP){stopProjection();return START_STICKY}
@@ -128,7 +130,7 @@ class RemoteAgentService : Service() {
     // (~1.7-2 Mbps). Cap the video sender's max bitrate to a modest budget scaled to the quality tier,
     // applied right after the local description applies (encodings exist by then), so the encoder
     // initialises for a light load. Framerate is already bounded by the capturer's capFps.
-    private fun capSenderBitrate(pc:PeerConnection){try{val s=pc.senders.firstOrNull{it.track()?.kind()=="video"}?:return;val p=s.parameters?:return;val bps=when{capMaxEdge<=360->250_000;capMaxEdge<=480->400_000;capMaxEdge<=640->700_000;capMaxEdge<=960->1_200_000;else->2_000_000};var changed=false;for(e in p.encodings){e.maxBitrateBps=bps;changed=true};if(changed){s.parameters=p;crumb("bitrate cap ${bps/1000}k")}}catch(_:Throwable){}}
+    private fun capSenderBitrate(pc:PeerConnection){try{crumb("bitrate:start");val s=pc.senders.firstOrNull{it.track()?.kind()=="video"}?:return;val p=s.parameters?:return;val bps=when{capMaxEdge<=360->250_000;capMaxEdge<=480->400_000;capMaxEdge<=640->700_000;capMaxEdge<=960->1_200_000;else->2_000_000};var changed=false;for(e in p.encodings){e.maxBitrateBps=bps;changed=true};if(changed){s.parameters=p;crumb("bitrate cap ${bps/1000}k")}}catch(_:Throwable){}}
     private fun sendSignal(p:JSONObject){if(::socket.isInitialized)socket.send(p.toString())}
     private fun disable(m:JSONObject){if(m.optString("sessionId")==activeSession)endSession()}
     // End ONE session: dispose only the PeerConnection + this session's track/inputChannel. The
@@ -143,4 +145,11 @@ class RemoteAgentService : Service() {
     companion object{const val EXTRA_RESULT_CODE="resultCode";const val EXTRA_DATA="projectionData";private const val CHANNEL="vremote-agent";const val ACTION_ACCEPT="vn.vplus.vremote.ACCEPT";const val ACTION_REJECT="vn.vplus.vremote.REJECT";const val ACTION_STOP="vn.vplus.vremote.STOP";const val EXTRA_REQUEST_ID="requestId";@Volatile var projectionHeld=false}
 }
 private open class SimpleSdpObserver:SdpObserver{override fun onCreateSuccess(s:SessionDescription){};override fun onSetSuccess(){};override fun onCreateFailure(s:String){};override fun onSetFailure(s:String){}}
+// Breadcrumbs which encoder WebRTC actually creates (and that creation was reached) — delegates
+// everything to the real factory. Safe: for a native-backed inner factory the wrapper's createEncoder
+// still runs and forwards; the returned encoder keeps its own native backing.
+private class DiagEncoderFactory(private val inner:VideoEncoderFactory,private val crumb:(String)->Unit):VideoEncoderFactory{
+    override fun createEncoder(info:VideoCodecInfo):VideoEncoder?{crumb("enc:create ${info.name}");return try{inner.createEncoder(info)}catch(t:Throwable){crumb("enc:create FAIL ${t.message}");null}}
+    override fun getSupportedCodecs():Array<VideoCodecInfo> = inner.getSupportedCodecs()
+}
 private fun Intent.getParcelableExtraCompat(key:String):Intent?=if(Build.VERSION.SDK_INT>=33)getParcelableExtra(key,Intent::class.java)else @Suppress("DEPRECATION") getParcelableExtra(key)
