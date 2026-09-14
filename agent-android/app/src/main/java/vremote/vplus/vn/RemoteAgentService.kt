@@ -3,7 +3,13 @@ package vremote.vplus.vn
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.Image
+import android.media.ImageReader
 import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.util.DisplayMetrics
 import android.view.WindowManager
@@ -33,7 +39,14 @@ import kotlin.math.abs
  */
 class RemoteAgentService : Service() {
     private lateinit var socket: WebSocket; private lateinit var factory: PeerConnectionFactory; private lateinit var egl: EglBase
-    private var peer: PeerConnection?=null; private var capturer: ScreenCapturerAndroid?=null; private var source: VideoSource?=null; private var helper: SurfaceTextureHelper?=null; private var sessionTrack: VideoTrack?=null
+    private var peer: PeerConnection?=null; private var source: VideoSource?=null; private var sessionTrack: VideoTrack?=null
+    // GPU-free screen capture (RK3566 & other weak boxes SIGSEGV in the GL texture->I420 readback that
+    // ScreenCapturerAndroid + SurfaceTextureHelper force on both the HW and SW encoders). MediaProjection
+    // renders into an ImageReader (RGBA_8888 CPU buffers); each frame is converted to I420 on the CPU and
+    // pushed straight to the VideoSource — no EglBase, no SurfaceTextureHelper, no YuvConverter, no GPU.
+    private var mediaProjection: MediaProjection?=null; private var imageReader: ImageReader?=null; private var virtualDisplay: VirtualDisplay?=null
+    private var captureThread: HandlerThread?=null; private var captureHandler: Handler?=null
+    private var rgbaScratch: ByteArray?=null; private var yScratch: ByteArray?=null; private var uScratch: ByteArray?=null; private var vScratch: ByteArray?=null; private var lastFrameMs=0L
     private var activeSession:String?=null; private var activeCapability:String?=null; private var activeIceServers:List<PeerConnection.IceServer> = emptyList(); private var inputChannel:DataChannel?=null; private var screenW=0; private var screenH=0; private var projectionIntent:Intent?=null; private var expiryTask:Runnable?=null; @Volatile private var destroyed=false; private var polling=false; private var shownRequest:String?=null; private val notifId=2; private val consentNotifId=3
     private val seenNonces=ConcurrentHashMap.newKeySet<String>(); private val processedCommands=ConcurrentHashMap.newKeySet<String>(); private val handler=Handler(Looper.getMainLooper())
     // Encoder mode ("sw"/"hw") + capture size are pref-driven so the combo that survives this box's
@@ -58,16 +71,14 @@ class RemoteAgentService : Service() {
      getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
      // Encoder mode + capture resolution are CONFIGURABLE (MainActivity cycles them) so the exact
      // combination that survives this box's video pipeline can be found in ONE build. The crash was a
-     // native SIGSEGV at first-frame encode (breadcrumb stuck at "offer:local ok") on both encoders at
-     // 640x360; every key breadcrumb is now tagged with [mode WxH] so a crash pinpoints the config.
-     // The RK3566 SIGSEGV was pinpointed (prevCrumb="bitrate cap 250k" → crash on the very first frame
-     // fed to the encoder). The encoder built fine (offer:local ok passed); it faults when a TEXTURE
-     // frame reaches OMX.rk — the classic Rockchip surface-input crash. The fix is BYTE-BUFFER input:
+     // native SIGSEGV at first-frame encode. Root cause (v0.0.15/0.0.17 breadcrumbs, prevCrumb="bitrate
+     // cap ...k" → crash) was the GL texture->I420 readback the OLD ScreenCapturerAndroid pipeline forced;
+     // it faulted on BOTH the HW (texture surface) and byte-buffer HW paths, i.e. in the GPU step, not the
+     // encoder. startProjection now feeds CPU I420 frames from an ImageReader (no GL at all), so the choice
+     // below is purely which encoder consumes those I420 frames — neither touches the GPU:
      //  - "hw" (default): DefaultVideoEncoderFactory with a NULL shared EGL context → HardwareVideoEncoder
-     //          switches to I420/ByteBuffer input, so it still uses the box's hardware MediaCodec but the
-     //          capturer's texture is converted to I420 (on the capturer's own valid GL context) BEFORE it
-     //          reaches OMX.rk — no texture ever touches the encoder, sidestepping the surface-input fault.
-     //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8) — fallback if the hardware codec still misbehaves.
+     //          in I420/ByteBuffer input mode (the box's hardware MediaCodec, fed our CPU I420 directly).
+     //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8) — fully GPU/MediaCodec-free fallback.
      val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","hw")?:"hw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
      val encoderFactory:VideoEncoderFactory=if(encMode=="sw")SoftwareVideoEncoderFactory() else DefaultVideoEncoderFactory(null,true,false)
      // Startup markers go to a SEPARATE "boot" key so a service restart (START_STICKY, e.g. after a
@@ -110,15 +121,58 @@ class RemoteAgentService : Service() {
     // offer/candidate kept as a fallback.
     private fun handle(m:JSONObject){when(m.optString("type")){"session.enable"->enable(m);"session.disable"->disable(m);"command"->command(m);"agent.signaling"->{val pl=m.optJSONObject("payload")?:return;when(pl.optString("type")){"offer"->handleOffer(pl);"candidate"->handleCandidate(pl);"leave"->endSession()}};"offer"->handleOffer(m);"candidate"->handleCandidate(m)}}
     private fun enable(m:JSONObject){val p=getSharedPreferences("vremote",MODE_PRIVATE);val id=p.getString("deviceId","")?:"";val secret=p.getString("deviceToken","")?:"";val sid=m.optString("sessionId");val nonce=m.optString("nonce");val ts=m.optLong("ts",0);val ttl=m.optInt("ttlSec",0);val cap=m.optString("capability");val sig=m.optString("sig");if(m.optString("deviceId")!=id||sid.isBlank()||nonce.isBlank()||sig.isBlank()||ttl !in 1..3600||abs(System.currentTimeMillis()/1000-ts)>300)return;if(!VRemoteSigner.verify(secret,VRemoteSigner.canonicalSessionEnable(id,sid,cap,ttl,nonce,ts),sig))return;if(!seenNonces.add("session:$nonce"))return;endSession();p.edit().putInt("lastSessionTtl",ttl).putLong("lastSessionExpires",ts+ttl).apply();activeSession=sid;activeCapability=cap;activeIceServers=parseIceServers(m.optJSONArray("iceServers"));cacheScreenSize();flow("enable cap=$cap source=${source!=null}");expiryTask=Runnable{if(activeSession==sid)endSession()};handler.postDelayed(expiryTask!!,ttl*1000L);if(source==null){notifyConsentNeeded();return};if(!newSessionPeer())return;crumb("peer ready, ready sent");sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",sid).put("payload",JSONObject().put("type","ready").put("sessionId",sid)))}
-    // Consent is a ONE-TIME step: create the capturer+source once and keep them alive across sessions.
-    private fun startProjection():Boolean{if(source!=null)return true;val data=projectionIntent?:return false;crumb("proj:createSource");val src=factory.createVideoSource(true);source=src;val h=SurfaceTextureHelper.create("VRemoteCapture",egl.eglBaseContext);helper=h;val capt=ScreenCapturerAndroid(data,object:MediaProjection.Callback(){override fun onStop(){handler.post{onProjectionRevoked()}}});capturer=capt;
-     // Android 14+ requires the mediaProjection-typed FGS to be running BEFORE the MediaProjection
-     // is acquired — ScreenCapturerAndroid.startCapture() acquires it internally, so switch the
-     // foreground type FIRST, then startCapture. Revert to the signaling type if capture fails.
-     startFgProjection();crumb("proj:startCapture");
-     // Derive the capture size from THIS device's screen (aspect preserved, 16-aligned, long edge
-     // <= capMaxEdge) right before capturing, so it adapts to any device/resolution.
-     computeCaptureSize();try{capt.initialize(h,this,src.capturerObserver);capt.startCapture(capW,capH,capFps)}catch(_:Throwable){onProjectionRevoked();return false};crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
+    // Consent is a ONE-TIME step: create the source + GPU-free ImageReader capture once and keep them
+    // alive across sessions. NO ScreenCapturerAndroid / SurfaceTextureHelper / EglBase — those force a
+    // GL texture->I420 readback that SIGSEGVs on the RK3566 (crash pinned at the first encoded frame,
+    // identical on HW and SW encoders). Here MediaProjection mirrors into an ImageReader (RGBA_8888 CPU
+    // buffers), and pushI420 converts each frame to I420 on the CPU and feeds the VideoSource directly.
+    private fun startProjection():Boolean{if(source!=null)return true;val data=projectionIntent?:return false;crumb("proj:createSource");val src=factory.createVideoSource(true);source=src
+     // Android 14+ requires the mediaProjection-typed FGS to be running BEFORE the MediaProjection is
+     // acquired, so switch the foreground type FIRST, then getMediaProjection.
+     startFgProjection();crumb("proj:startCapture")
+     // Capture size follows THIS device's screen (aspect preserved, 16-aligned, long edge <= capMaxEdge).
+     computeCaptureSize()
+     try{
+      val mpm=getSystemService(MediaProjectionManager::class.java)
+      val mp=mpm.getMediaProjection(Activity.RESULT_OK,data);mediaProjection=mp
+      // Android 14+ requires a registered callback before createVirtualDisplay.
+      mp.registerCallback(object:MediaProjection.Callback(){override fun onStop(){handler.post{onProjectionRevoked()}}},handler)
+      val ir=ImageReader.newInstance(capW,capH,PixelFormat.RGBA_8888,3);imageReader=ir
+      val obs=src.capturerObserver;obs.onCapturerStarted(true)
+      // Convert frames on a DEDICATED thread — the RGBA->I420 loop must never run on the main looper.
+      val ct=HandlerThread("VRemoteCapture").apply{start()};captureThread=ct;val ch2=Handler(ct.looper);captureHandler=ch2
+      // ImageReader fires at the display's refresh rate; throttle to capFps so the weak CPU keeps up.
+      ir.setOnImageAvailableListener({reader->val img=try{reader.acquireLatestImage()}catch(_:Throwable){null}?:return@setOnImageAvailableListener;try{val now=SystemClock.uptimeMillis();val gap=1000L/capFps.coerceIn(1,30);if(now-lastFrameMs>=gap){lastFrameMs=now;pushI420(img,obs)}}catch(_:Throwable){}finally{try{img.close()}catch(_:Throwable){}}},ch2)
+      val dpi=resources.displayMetrics.densityDpi.coerceIn(120,640)
+      virtualDisplay=mp.createVirtualDisplay("VRemote",capW,capH,dpi,DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,ir.surface,null,ch2)
+     }catch(t:Throwable){crumb("proj:img FAIL ${t.message}");onProjectionRevoked();return false}
+     crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
+    // Convert one RGBA_8888 screen frame to I420 on the CPU (BT.601, full 2x2 chroma subsample) and push
+    // it to the VideoSource. Uses reusable scratch arrays + bulk ByteBuffer copies so a weak box keeps up
+    // at the modest capFps. No GL anywhere — this is the whole point of the ImageReader path.
+    private fun pushI420(img:Image,obs:CapturerObserver){
+     val w=capW;val hgt=capH;if(w<=0||hgt<=0)return
+     val plane=img.planes.firstOrNull()?:return;val rowStride=plane.rowStride;val pxStride=plane.pixelStride;val buf=plane.buffer
+     val n=buf.remaining();var rgba=rgbaScratch;if(rgba==null||rgba.size<n){rgba=ByteArray(n);rgbaScratch=rgba};buf.get(rgba,0,n)
+     val cw=(w+1)/2;val ch=(hgt+1)/2
+     var yA=yScratch;if(yA==null||yA.size<w*hgt){yA=ByteArray(w*hgt);yScratch=yA}
+     var uA=uScratch;if(uA==null||uA.size<cw*ch){uA=ByteArray(cw*ch);uScratch=uA}
+     var vA=vScratch;if(vA==null||vA.size<cw*ch){vA=ByteArray(cw*ch);vScratch=vA}
+     var y=0
+     while(y<hgt){val rowBase=y*rowStride;val yBase=y*w;val cBase=(y/2)*cw;val chromaRow=(y and 1)==0;var x=0
+      while(x<w){val i=rowBase+x*pxStride
+       val r=rgba[i].toInt() and 0xFF;val g=rgba[i+1].toInt() and 0xFF;val b=rgba[i+2].toInt() and 0xFF
+       var yy=(66*r+129*g+25*b+128 shr 8)+16;if(yy<16)yy=16 else if(yy>235)yy=235;yA[yBase+x]=yy.toByte()
+       if(chromaRow&&(x and 1)==0){val ci=cBase+(x/2)
+        var u=(-38*r-74*g+112*b+128 shr 8)+128;if(u<16)u=16 else if(u>240)u=240;uA[ci]=u.toByte()
+        var v=(112*r-94*g-18*b+128 shr 8)+128;if(v<16)v=16 else if(v>240)v=240;vA[ci]=v.toByte()}
+       x++}
+      y++}
+     val i420=JavaI420Buffer.allocate(w,hgt)
+     fillPlane(i420.dataY,i420.strideY,yA,w,hgt);fillPlane(i420.dataU,i420.strideU,uA,cw,ch);fillPlane(i420.dataV,i420.strideV,vA,cw,ch)
+     val frame=VideoFrame(i420,0,System.nanoTime());try{obs.onFrameCaptured(frame)}finally{frame.release()}
+    }
+    private fun fillPlane(dst:java.nio.ByteBuffer,stride:Int,src:ByteArray,w:Int,h:Int){if(stride==w){dst.position(0);dst.put(src,0,w*h)}else{var r=0;while(r<h){dst.position(r*stride);dst.put(src,r*w,w);r++}}}
     // ICE servers are authoritatively supplied by session.enable's `iceServers`; parse null-safely.
     // Each element: {"urls": String|[String], "username"?, "credential"?}. Falls back to google STUN.
     private fun parseIceServers(arr:JSONArray?):List<PeerConnection.IceServer>{val out=mutableListOf<PeerConnection.IceServer>();if(arr!=null)for(i in 0 until arr.length()){val o=arr.optJSONObject(i)?:continue;val urls=mutableListOf<String>();when(val u=o.opt("urls")){is String->if(u.isNotBlank())urls.add(u);is JSONArray->for(j in 0 until u.length()){val s=u.optString(j);if(s.isNotBlank())urls.add(s)}};if(urls.isEmpty())continue;val b=PeerConnection.IceServer.builder(urls);val user=o.optString("username","");val cred=o.optString("credential","");if(user.isNotEmpty()&&cred.isNotEmpty()){b.setUsername(user);b.setPassword(cred)};try{out.add(b.createIceServer())}catch(_:Throwable){}};return out}
@@ -158,11 +212,14 @@ class RemoteAgentService : Service() {
     // capturer+source+projection stay alive so the next connect needs zero taps.
     private fun endSession(){expiryTask?.let{handler.removeCallbacks(it)};expiryTask=null;try{inputChannel?.dispose()}catch(_:Throwable){};inputChannel=null;peer?.close();peer=null;sessionTrack?.dispose();sessionTrack=null;activeSession=null;activeCapability=null}
     // Explicit "Dừng": drop the projection but stay reachable on signaling.
-    private fun stopProjection(){endSession();try{capturer?.stopCapture()}catch(_:Throwable){};capturer?.dispose();capturer=null;source?.dispose();source=null;helper?.dispose();helper=null;projectionIntent=null;projectionHeld=false;startFgSignaling()}
+    // Tear down the ImageReader capture pipeline (order: stop frames, close reader, stop projection,
+    // dispose source). All null-safe so it's reusable from the startProjection failure path too.
+    private fun releaseCapture(){try{virtualDisplay?.release()}catch(_:Throwable){};virtualDisplay=null;try{imageReader?.close()}catch(_:Throwable){};imageReader=null;try{mediaProjection?.stop()}catch(_:Throwable){};mediaProjection=null;try{captureThread?.quitSafely()}catch(_:Throwable){};captureThread=null;captureHandler=null;try{source?.dispose()}catch(_:Throwable){};source=null}
+    private fun stopProjection(){endSession();releaseCapture();projectionIntent=null;projectionHeld=false;startFgSignaling()}
     // User revoked capture (or it failed): clear it, tell the user to reopen the app to re-grant.
-    private fun onProjectionRevoked(){endSession();try{capturer?.stopCapture()}catch(_:Throwable){};capturer?.dispose();capturer=null;source?.dispose();source=null;helper?.dispose();helper=null;projectionIntent=null;projectionHeld=false;startFgSignaling();notifyConsentNeeded()}
+    private fun onProjectionRevoked(){endSession();releaseCapture();projectionIntent=null;projectionHeld=false;startFgSignaling();notifyConsentNeeded()}
     override fun onBind(i:Intent?):IBinder?=null
-    override fun onDestroy(){destroyed=true;endSession();try{capturer?.stopCapture()}catch(_:Throwable){};capturer?.dispose();capturer=null;source?.dispose();source=null;helper?.dispose();helper=null;projectionHeld=false;try{if(::socket.isInitialized)socket.close(1000,"shutdown")}catch(_:Throwable){};factory.dispose();egl.release();super.onDestroy()}
+    override fun onDestroy(){destroyed=true;endSession();releaseCapture();projectionHeld=false;try{if(::socket.isInitialized)socket.close(1000,"shutdown")}catch(_:Throwable){};factory.dispose();egl.release();super.onDestroy()}
     companion object{const val EXTRA_RESULT_CODE="resultCode";const val EXTRA_DATA="projectionData";private const val CHANNEL="vremote-agent";const val ACTION_ACCEPT="vn.vplus.vremote.ACCEPT";const val ACTION_REJECT="vn.vplus.vremote.REJECT";const val ACTION_STOP="vn.vplus.vremote.STOP";const val EXTRA_REQUEST_ID="requestId";@Volatile var projectionHeld=false}
 }
 private open class SimpleSdpObserver:SdpObserver{override fun onCreateSuccess(s:SessionDescription){};override fun onSetSuccess(){};override fun onCreateFailure(s:String){};override fun onSetFailure(s:String){}}
