@@ -47,7 +47,15 @@ class RemoteAgentService : Service() {
     // a weak box be tuned down. Fps stays modest.
     private fun align16(v:Int)=(((v+8)/16)*16).coerceAtLeast(16)
     private fun computeCaptureSize(){cacheScreenSize();var w=screenW;var h=screenH;if(w<=0||h<=0){w=1280;h=720};val longEdge=maxOf(w,h);val maxE=capMaxEdge.coerceAtLeast(160);if(longEdge>maxE){val s=maxE.toDouble()/longEdge;w=(w*s).toInt();h=(h*s).toInt()};capW=align16(w);capH=align16(h)}
-    override fun onCreate(){super.onCreate();getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
+    override fun onCreate(){super.onCreate();
+     // Snapshot the PREVIOUS run's last breadcrumb before this process can overwrite it. A native
+     // SIGSEGV (first-frame encode) leaves the true crash step in "crumb", but on restart the socket
+     // reconnects and the server re-sends session.enable — enable() then overwrites "crumb" with
+     // "enable cap=..." (source=null, since MediaProjection consent doesn't survive a restart) before
+     // anyone can read it. Copy it to "prevCrumb" once per launch so the real crash step survives the
+     // reopen. onCreate calls only boot() (never crumb()), so "crumb" here is still the prior run's.
+     run{val pp=getSharedPreferences("vremote",MODE_PRIVATE);val last=pp.getString("crumb","")?:"";if(last.isNotEmpty())pp.edit().putString("prevCrumb",last).commit()}
+     getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
      // Encoder mode + capture resolution are CONFIGURABLE (MainActivity cycles them) so the exact
      // combination that survives this box's video pipeline can be found in ONE build. The crash was a
      // native SIGSEGV at first-frame encode (breadcrumb stuck at "offer:local ok") on both encoders at
