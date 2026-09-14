@@ -190,6 +190,8 @@ final class DeviceController
             'lastSeenAt' => $d['lastSeenAt'] ?? null,
             'createdAt' => $d['createdAt'] ?? null,
             'activeSessions' => $d['activeSessions'] ?? 0,
+            'deviceInfo' => $d['deviceInfo'] ?? null,
+            'lastEvent' => $d['lastEvent'] ?? null,
         ];
     }
 

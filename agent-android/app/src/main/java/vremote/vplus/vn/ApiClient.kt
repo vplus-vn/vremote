@@ -31,11 +31,16 @@ object ApiClient {
 
     data class Announce(val deviceId: String, val pairingId: String, val deviceToken: String)
 
-    fun announce(baseUrl: String, machineCode: String, sessionPwHash: String, personalPwHash: String?, requireAccept: Boolean): Announce {
+    fun announce(baseUrl: String, machineCode: String, sessionPwHash: String, personalPwHash: String?, requireAccept: Boolean,
+                 deviceInfo: String? = null, lastEvent: String? = null): Announce {
         val body = JSONObject()
             .put("machineCode", machineCode).put("agentVersion", "android-" + BuildConfig.VERSION_NAME).put("platform", "android")
             .put("sessionPasswordHash", sessionPwHash).put("requireAccept", requireAccept)
         if (personalPwHash != null) body.put("personalPasswordHash", personalPwHash)
+        // Diagnostics uploaded on launch so support can see the box's codec caps + last crash point
+        // in the console, without the tester having to copy/paste anything.
+        if (!deviceInfo.isNullOrEmpty()) body.put("deviceInfo", deviceInfo.take(8000))
+        if (!lastEvent.isNullOrEmpty()) body.put("lastEvent", lastEvent.take(500))
         val req = Request.Builder().url(apiBase(baseUrl) + "/agent/announce")
             .post(body.toString().toRequestBody(JSON)).build()
         http.newCall(req).execute().use { r ->

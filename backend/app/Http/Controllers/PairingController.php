@@ -30,6 +30,8 @@ final class PairingController
             'sessionPasswordHash' => ['required', 'string', 'max:128'],
             'personalPasswordHash' => ['nullable', 'string', 'max:128'],
             'requireAccept' => ['nullable', 'boolean'],
+            'deviceInfo' => ['nullable', 'string', 'max:12000'],
+            'lastEvent' => ['nullable', 'string', 'max:600'],
         ]);
 
         try {
@@ -40,6 +42,8 @@ final class PairingController
                 $data['sessionPasswordHash'],
                 $data['personalPasswordHash'] ?? null,
                 $request->has('requireAccept') ? (bool) $data['requireAccept'] : null,
+                $data['deviceInfo'] ?? null,
+                $data['lastEvent'] ?? null,
             );
         } catch (PairingException $e) {
             return $this->fail($e);
