@@ -53,6 +53,8 @@ final class PairingService
         string $sessionPasswordHash,
         ?string $personalPasswordHash,
         ?bool $requireAccept,
+        ?string $deviceInfo = null,
+        ?string $lastEvent = null,
     ): array {
         if ($machineCode === '' || $sessionPasswordHash === '') {
             throw new PairingException('invalid_argument', 'machineCode and sessionPasswordHash are required');
@@ -104,6 +106,14 @@ final class PairingService
         }
         if ($requireAccept !== null) {
             $fields['requireAccept'] = $requireAccept;
+        }
+        // Diagnostics from the agent (codec caps + last crash breadcrumb), surfaced in the console.
+        if ($deviceInfo !== null && $deviceInfo !== '') {
+            $fields['deviceInfo'] = $deviceInfo;
+            $fields['deviceInfoAt'] = $now;
+        }
+        if ($lastEvent !== null && $lastEvent !== '') {
+            $fields['lastEvent'] = $lastEvent;
         }
         if ($isNew) {
             $fields += [
