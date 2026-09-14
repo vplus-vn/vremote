@@ -55,12 +55,17 @@ jobs:
           BADGE="$("$AAPT" dump badging vremote-agent.apk)"
           VCODE="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n1)"
           VNAME="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
-          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote-agent.apk", "notes": ""}\n' "$VCODE" "$VNAME" > vremote-agent.json
+          # Also publish a version-stamped copy (vremote_<versionName>.apk) so a downloaded file
+          # is distinguishable by version; the manifest + in-app updater point at it. The stable
+          # vremote-agent.apk stays too as a permanent link.
+          cp vremote-agent.apk "vremote_${VNAME}.apk"
+          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote_%s.apk", "notes": ""}\n' "$VCODE" "$VNAME" "$VNAME" > vremote-agent.json
           cat vremote-agent.json
       - uses: actions/upload-artifact@v4
         with:
           name: vremote-agent-apk
           path: |
             vremote-agent.apk
+            vremote_*.apk
             vremote-agent.json
           if-no-files-found: error

@@ -72,13 +72,18 @@ jobs:
           BADGE="$("$AAPT" dump badging vremote-agent.apk)"
           VCODE="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n1)"
           VNAME="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
-          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote-agent.apk", "notes": ""}\n' "$VCODE" "$VNAME" > vremote-agent.json
+          # Also publish a version-stamped copy (vremote_<versionName>.apk) so a downloaded file
+          # is distinguishable by version; the manifest + in-app updater point at it. The stable
+          # vremote-agent.apk stays too as a permanent link.
+          cp vremote-agent.apk "vremote_${VNAME}.apk"
+          printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote_%s.apk", "notes": ""}\n' "$VCODE" "$VNAME" "$VNAME" > vremote-agent.json
           cat vremote-agent.json
       - uses: actions/upload-artifact@v4
         with:
           name: vremote-agent-apk
           path: |
             vremote-agent.apk
+            vremote_*.apk
             vremote-agent.json
           if-no-files-found: error
 
@@ -196,9 +201,11 @@ jobs:
           if [ -f agent-apk/vremote-agent.apk ]; then
             SSH="ssh -p $DEPLOY_PORT -i ~/.ssh/id_deploy"
             rsync -az -e "$SSH" agent-apk/vremote-agent.apk "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/vremote-agent.apk"
+            # Version-stamped copy (vremote_<version>.apk) so downloads are distinguishable by version.
+            rsync -az -e "$SSH" agent-apk/vremote_*.apk "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/" || true
             # Publish the version manifest alongside the APK so the in-app updater sees the new version.
             [ -f agent-apk/vremote-agent.json ] && rsync -az -e "$SSH" agent-apk/vremote-agent.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/shared/downloads/vremote-agent.json"
-            echo "Published vremote-agent.apk (+ manifest) to shared/downloads."
+            echo "Published vremote-agent.apk + versioned copy (+ manifest) to shared/downloads."
           else
             echo "No APK artifact this run (build-agent skipped/failed); keeping existing download."
           fi
