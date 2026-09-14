@@ -46,7 +46,7 @@ class RemoteAgentService : Service() {
     // pushed straight to the VideoSource — no EglBase, no SurfaceTextureHelper, no YuvConverter, no GPU.
     private var mediaProjection: MediaProjection?=null; private var imageReader: ImageReader?=null; private var virtualDisplay: VirtualDisplay?=null
     private var captureThread: HandlerThread?=null; private var captureHandler: Handler?=null
-    private var rgbaScratch: ByteArray?=null; private var yScratch: ByteArray?=null; private var uScratch: ByteArray?=null; private var vScratch: ByteArray?=null; private var lastFrameMs=0L
+    private var rgbaScratch: ByteArray?=null; private var yScratch: ByteArray?=null; private var uScratch: ByteArray?=null; private var vScratch: ByteArray?=null; private var lastFrameMs=0L; @Volatile private var frame1Logged=false
     private var activeSession:String?=null; private var activeCapability:String?=null; private var activeIceServers:List<PeerConnection.IceServer> = emptyList(); private var inputChannel:DataChannel?=null; private var screenW=0; private var screenH=0; private var projectionIntent:Intent?=null; private var expiryTask:Runnable?=null; @Volatile private var destroyed=false; private var polling=false; private var shownRequest:String?=null; private val notifId=2; private val consentNotifId=3
     private val seenNonces=ConcurrentHashMap.newKeySet<String>(); private val processedCommands=ConcurrentHashMap.newKeySet<String>(); private val handler=Handler(Looper.getMainLooper())
     // Encoder mode ("sw"/"hw") + capture size are pref-driven so the combo that survives this box's
@@ -69,18 +69,15 @@ class RemoteAgentService : Service() {
      // reopen. onCreate calls only boot() (never crumb()), so "crumb" here is still the prior run's.
      run{val pp=getSharedPreferences("vremote",MODE_PRIVATE);val last=pp.getString("crumb","")?:"";if(last.isNotEmpty())pp.edit().putString("prevCrumb",last).commit()}
      getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL,"VRemote",NotificationManager.IMPORTANCE_LOW));startFgSignaling();PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());egl=EglBase.create();
-     // Encoder mode + capture resolution are CONFIGURABLE (MainActivity cycles them) so the exact
-     // combination that survives this box's video pipeline can be found in ONE build. The crash was a
-     // native SIGSEGV at first-frame encode. Root cause (v0.0.15/0.0.17 breadcrumbs, prevCrumb="bitrate
-     // cap ...k" → crash) was the GL texture->I420 readback the OLD ScreenCapturerAndroid pipeline forced;
-     // it faulted on BOTH the HW (texture surface) and byte-buffer HW paths, i.e. in the GPU step, not the
-     // encoder. startProjection now feeds CPU I420 frames from an ImageReader (no GL at all), so the choice
-     // below is purely which encoder consumes those I420 frames — neither touches the GPU:
-     //  - "hw" (default): DefaultVideoEncoderFactory with a NULL shared EGL context → HardwareVideoEncoder
-     //          in I420/ByteBuffer input mode (the box's hardware MediaCodec, fed our CPU I420 directly).
-     //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8) — fully GPU/MediaCodec-free fallback.
-     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","hw")?:"hw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
-     val encoderFactory:VideoEncoderFactory=if(encMode=="sw")SoftwareVideoEncoderFactory() else DefaultVideoEncoderFactory(null,true,false)
+     // v0.0.19: FORCE pure-software VP8 encoding, ignoring the encMode pref. Every breadcrumb to date
+     // (0.0.x texture-HW, 0.0.17 byte-buffer-HW, 0.0.18 CPU-I420 + HW) crashed at the SAME step —
+     // "bitrate cap …k" → native SIGSEGV on the first frame — because all three used the box's HARDWARE
+     // H264 encoder (OMX.rk), which faults on this RK3566 no matter how it is fed. SoftwareVideoEncoderFactory
+     // is libvpx VP8: pure C, no MediaCodec, no OMX, no GPU. Combined with the ImageReader CPU capture the
+     // ENTIRE send path is now 100% software and never touches the Rockchip hardware codec or the Mali GPU.
+     // (The MainActivity SW/HW toggle is inert in this build; HW will be re-offered once SW is confirmed.)
+     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode="sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
+     val encoderFactory:VideoEncoderFactory=SoftwareVideoEncoderFactory()
      // Startup markers go to a SEPARATE "boot" key so a service restart (START_STICKY, e.g. after a
      // crash) never overwrites the crash breadcrumb of the previous session (which lives in "crumb").
      boot("factory build ${cfg()} enc=$encMode")
@@ -126,7 +123,7 @@ class RemoteAgentService : Service() {
     // GL texture->I420 readback that SIGSEGVs on the RK3566 (crash pinned at the first encoded frame,
     // identical on HW and SW encoders). Here MediaProjection mirrors into an ImageReader (RGBA_8888 CPU
     // buffers), and pushI420 converts each frame to I420 on the CPU and feeds the VideoSource directly.
-    private fun startProjection():Boolean{if(source!=null)return true;val data=projectionIntent?:return false;crumb("proj:createSource");val src=factory.createVideoSource(true);source=src
+    private fun startProjection():Boolean{if(source!=null)return true;val data=projectionIntent?:return false;frame1Logged=false;crumb("proj:createSource");val src=factory.createVideoSource(true);source=src
      // Android 14+ requires the mediaProjection-typed FGS to be running BEFORE the MediaProjection is
      // acquired, so switch the foreground type FIRST, then getMediaProjection.
      startFgProjection();crumb("proj:startCapture")
@@ -170,7 +167,11 @@ class RemoteAgentService : Service() {
       y++}
      val i420=JavaI420Buffer.allocate(w,hgt)
      fillPlane(i420.dataY,i420.strideY,yA,w,hgt);fillPlane(i420.dataU,i420.strideU,uA,cw,ch);fillPlane(i420.dataV,i420.strideV,vA,cw,ch)
+     // First-frame breadcrumbs isolate a crash in OUR I420 push ("push:frame1") vs downstream in the
+     // encoder (crumb stays past it). Only the first frame writes, so this costs nothing steady-state.
+     if(!frame1Logged)crumb("push:frame1 ${w}x$hgt")
      val frame=VideoFrame(i420,0,System.nanoTime());try{obs.onFrameCaptured(frame)}finally{frame.release()}
+     if(!frame1Logged){frame1Logged=true;crumb("push:frame1 ok")}
     }
     private fun fillPlane(dst:java.nio.ByteBuffer,stride:Int,src:ByteArray,w:Int,h:Int){if(stride==w){dst.position(0);dst.put(src,0,w*h)}else{var r=0;while(r<h){dst.position(r*stride);dst.put(src,r*w,w);r++}}}
     // ICE servers are authoritatively supplied by session.enable's `iceServers`; parse null-safely.
