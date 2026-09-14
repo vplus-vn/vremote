@@ -91,6 +91,14 @@ async function announce(){
 }
 
 async function startShare(){
+ // Mobile browsers (Android/iOS) do NOT implement getDisplayMedia — screen sharing from the web is
+ // desktop-only. Show a clear message + the native app link instead of a raw "not a function" error.
+ if(!navigator.mediaDevices||typeof navigator.mediaDevices.getDisplayMedia!=='function'){
+  let apk='/downloads/vremote-agent.json';
+  try{const m=await (await fetch('/downloads/vremote-agent.json',{cache:'no-store'})).json(); if(m&&m.url)apk=m.url;}catch(e){}
+  setStatus('Trình duyệt di động (Android/iOS) không hỗ trợ chia sẻ màn hình qua web. Muốn chia sẻ màn hình ANDROID hãy cài app VRemote: '+location.origin+apk+' . Bản web chỉ chia sẻ được trên máy tính Windows / Linux / macOS.',true);
+  return;
+ }
  try{
   stream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:false});
   stream.getVideoTracks()[0].addEventListener('ended',stopShare);
