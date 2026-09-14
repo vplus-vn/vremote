@@ -1,12 +1,15 @@
 package vremote.vplus.vn
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
+import android.app.ApplicationExitInfo
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -54,6 +57,9 @@ class MainActivity : Activity() {
         }
         // Session password is stable: generated once, reused every launch. Only "Đổi" changes it.
         sessionPw = p.getString("sessionPw", "")?.takeIf { it.isNotEmpty() } ?: randomPw().also { p.edit().putString("sessionPw", it).apply() }
+        // Pull the REAL native crash (tombstone) of the previous process from Android 11's
+        // ApplicationExitInfo — the definitive stack for the intermittent SIGSEGV that breadcrumbs can't pin.
+        captureExitInfo(p)
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 40, 32, 32) }
         // Header: app name (left) + version badge in the top corner, so the running build is obvious.
@@ -66,6 +72,9 @@ class MainActivity : Activity() {
         // Crash diagnostics only appear when set (small, so they don't clutter the normal screen).
         p.getString("prevCrumb", "")?.takeIf { it.isNotEmpty() }?.let { pc ->
             root.addView(TextView(this).apply { text = "🔎 Bước cuối lần chạy trước (nghi crash): $pc"; setTextColor(0xFFB91C1C.toInt()); textSize = 12f; setPadding(0, 12, 0, 2) })
+        }
+        p.getString("exitInfo", "")?.takeIf { it.isNotEmpty() }?.let { ex ->
+            root.addView(TextView(this).apply { text = "💥 Lỗi native lần trước (gửi kỹ thuật):\n$ex"; setTextColor(0xFFB91C1C.toInt()); textSize = 10.5f; setTextIsSelectable(true); setPadding(0, 6, 0, 2) })
         }
         p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let { c ->
             root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 6, 0, 2) })
@@ -198,8 +207,9 @@ class MainActivity : Activity() {
             try {
                 // Upload diagnostics so support can read the box's codec caps + last crash point in the
                 // console without the tester pasting anything (helps pin the first-frame encode crash).
-                val di = try { DeviceInfo.report() } catch (_: Throwable) { "" }
-                val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | flow=" + (p.getString("flow", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
+                val exit = p.getString("exitInfo", "") ?: ""
+                val di = (if (exit.isNotEmpty()) "== LAST NATIVE CRASH (ApplicationExitInfo) ==\n$exit\n\n" else "") + (try { DeviceInfo.report() } catch (_: Throwable) { "" })
+                val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | flow=" + (p.getString("flow", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | exit=" + exit.lineSequence().firstOrNull().orEmpty() + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
                 val a = ApiClient.announce(base, machineCode, ApiClient.sha256(sessionPw), if (personal.isNotEmpty()) ApiClient.sha256(personal) else "", requireAccept, di, ev)
                 p.edit().putString("deviceId", a.deviceId).putString("deviceToken", a.deviceToken)
                     .putString("pairingId", a.pairingId).putString("signalingUrl", ApiClient.signalingUrl(base)).apply()
@@ -287,6 +297,34 @@ class MainActivity : Activity() {
         stopService(Intent(this, RemoteAgentService::class.java))
         autoSharePrompted = false // re-arm so the encoder/quality change re-pops the share dialog
         v.postDelayed({ startAgentService(null); refreshReady(); maybeAutoShare() }, 700)
+    }
+    /** Read the previous process's real native crash (tombstone) via Android 11 ApplicationExitInfo. */
+    private fun captureExitInfo(p: android.content.SharedPreferences) {
+        if (Build.VERSION.SDK_INT < 30) return
+        try {
+            val am = getSystemService(ActivityManager::class.java) ?: return
+            val infos = am.getHistoricalProcessExitReasons(packageName, 0, 6)
+            for (info in infos) {
+                val r = info.reason
+                if (r == ApplicationExitInfo.REASON_CRASH_NATIVE || r == ApplicationExitInfo.REASON_SIGNALED || r == ApplicationExitInfo.REASON_CRASH) {
+                    val head = "exit r=$r st=${info.status} @${info.timestamp / 1000 % 100000} desc=${info.description ?: ""}"
+                    var trace = ""
+                    try {
+                        info.traceInputStream?.use { ins ->
+                            val full = ins.bufferedReader().readText()
+                            // Keep the signal line + native backtrace frames (the diagnostic core of a tombstone).
+                            val keep = full.lineSequence().map { it.trim() }.filter { t ->
+                                t.startsWith("signal ") || t.contains("Abort message") || t.startsWith("backtrace") || Regex("^#\\d+ ").containsMatchIn(t)
+                            }.take(24).joinToString("\n")
+                            trace = keep.ifBlank { full.take(1500) }
+                        }
+                    } catch (_: Throwable) {}
+                    p.edit().putString("exitInfo", (head + "\n" + trace).take(3500)).apply()
+                    return
+                }
+            }
+            p.edit().remove("exitInfo").apply()
+        } catch (_: Throwable) {}
     }
     private fun label(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7280.toInt()); setPadding(0, 20, 0, 4) }
     private fun randomPw(n: Int = 6): String { val r = SecureRandom(); return (1..n).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("") }
