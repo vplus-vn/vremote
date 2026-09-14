@@ -56,8 +56,11 @@ class MainActivity : Activity() {
         root.addView(TextView(this).apply { text = "VRemote Agent"; textSize = 22f })
         root.addView(TextView(this).apply { text = "Chia sẻ màn hình thiết bị này"; setTextColor(0xFF6B7280.toInt()) })
 
+        p.getString("prevCrumb", "")?.takeIf { it.isNotEmpty() }?.let { pc ->
+            root.addView(TextView(this).apply { text = "🔎 Bước cuối lần chạy trước (nghi crash): $pc — chụp gửi kỹ thuật"; setTextColor(0xFFB91C1C.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
+        }
         p.getString("crumb", "")?.takeIf { it.isNotEmpty() }?.let { cr ->
-            root.addView(TextView(this).apply { text = "🔎 Bước cuối trước khi dừng: $cr — chụp gửi kỹ thuật"; setTextColor(0xFF2563EB.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
+            root.addView(TextView(this).apply { text = "🔎 Bước cuối phiên này: $cr — chụp gửi kỹ thuật"; setTextColor(0xFF2563EB.toInt()); textSize = 12f; setPadding(0, 12, 0, 4) })
         }
         p.getString("lastCrash", "")?.takeIf { it.isNotEmpty() }?.let { c ->
             root.addView(TextView(this).apply { text = "⚠ App đã dừng lần trước — chụp gửi kỹ thuật:\n$c"; setTextColor(0xFFB91C1C.toInt()); textSize = 11f; setPadding(0, 16, 0, 8) })
@@ -172,7 +175,7 @@ class MainActivity : Activity() {
                 // Upload diagnostics so support can read the box's codec caps + last crash point in the
                 // console without the tester pasting anything (helps pin the first-frame encode crash).
                 val di = try { DeviceInfo.report() } catch (_: Throwable) { "" }
-                val ev = ("crumb=" + (p.getString("crumb", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
+                val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
                 val a = ApiClient.announce(base, machineCode, ApiClient.sha256(sessionPw), if (personal.isNotEmpty()) ApiClient.sha256(personal) else "", requireAccept, di, ev)
                 p.edit().putString("deviceId", a.deviceId).putString("deviceToken", a.deviceToken)
                     .putString("pairingId", a.pairingId).putString("signalingUrl", ApiClient.signalingUrl(base)).apply()
