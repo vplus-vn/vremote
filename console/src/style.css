@@ -38,6 +38,12 @@ tbody tr.pinned{background:#fffbeb}
 tbody tr.pinned td:first-child{box-shadow:inset 3px 0 0 #f59e0b}
 button.ghost.pinned-btn{background:#fef3c7;color:#92400e}
 .pin-dot{font-size:12px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal{background:#fff;border-radius:12px;width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb}
+.modal-text{flex:1;min-height:340px;margin:12px 16px;padding:12px;border:1px solid #cbd5e1;border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre;overflow:auto;resize:vertical}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e7eb}
+.modal-actions .primary{background:#2563eb;color:#fff;border-color:#2563eb;padding:9px 16px}
 .reg-form{border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:16px;background:#fafbfc}
 .reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .reg-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#374151}
