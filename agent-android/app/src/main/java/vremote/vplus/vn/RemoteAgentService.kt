@@ -60,11 +60,16 @@ class RemoteAgentService : Service() {
      // combination that survives this box's video pipeline can be found in ONE build. The crash was a
      // native SIGSEGV at first-frame encode (breadcrumb stuck at "offer:local ok") on both encoders at
      // 640x360; every key breadcrumb is now tagged with [mode WxH] so a crash pinpoints the config.
-     //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8, no MediaCodec — sidesteps a broken hardware
-     //          codec, at the cost of a texture->I420 readback the box's GL driver may still fault on).
-     //  - "hw": DefaultVideoEncoderFactory surface mode (no readback, uses the box's MediaCodec directly).
-     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","sw")?:"sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
-     val encoderFactory:VideoEncoderFactory=if(encMode=="hw")DefaultVideoEncoderFactory(egl.eglBaseContext,true,false) else SoftwareVideoEncoderFactory()
+     // The RK3566 SIGSEGV was pinpointed (prevCrumb="bitrate cap 250k" → crash on the very first frame
+     // fed to the encoder). The encoder built fine (offer:local ok passed); it faults when a TEXTURE
+     // frame reaches OMX.rk — the classic Rockchip surface-input crash. The fix is BYTE-BUFFER input:
+     //  - "hw" (default): DefaultVideoEncoderFactory with a NULL shared EGL context → HardwareVideoEncoder
+     //          switches to I420/ByteBuffer input, so it still uses the box's hardware MediaCodec but the
+     //          capturer's texture is converted to I420 (on the capturer's own valid GL context) BEFORE it
+     //          reaches OMX.rk — no texture ever touches the encoder, sidestepping the surface-input fault.
+     //  - "sw": SoftwareVideoEncoderFactory (pure-CPU VP8) — fallback if the hardware codec still misbehaves.
+     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","hw")?:"hw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
+     val encoderFactory:VideoEncoderFactory=if(encMode=="sw")SoftwareVideoEncoderFactory() else DefaultVideoEncoderFactory(null,true,false)
      // Startup markers go to a SEPARATE "boot" key so a service restart (START_STICKY, e.g. after a
      // crash) never overwrites the crash breadcrumb of the previous session (which lives in "crumb").
      boot("factory build ${cfg()} enc=$encMode")
