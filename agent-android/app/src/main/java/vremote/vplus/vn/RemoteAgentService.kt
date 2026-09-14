@@ -57,10 +57,10 @@ class RemoteAgentService : Service() {
      //  - "hw": DefaultVideoEncoderFactory surface mode (no readback, uses the box's MediaCodec directly).
      val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode=p0.getString("encMode","sw")?:"sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
      val encoderFactory:VideoEncoderFactory=if(encMode=="hw")DefaultVideoEncoderFactory(egl.eglBaseContext,true,false) else SoftwareVideoEncoderFactory()
-     crumb("factory ${cfg()}")
-     // Wrap the encoder factory so a breadcrumb records WHICH encoder WebRTC picks and that creation
-     // was reached — pinpoints, on the next crash, whether it dies before/at/after encoder creation.
-     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(DiagEncoderFactory(encoderFactory){s->crumb(s)}).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()}
+     // Startup markers go to a SEPARATE "boot" key so a service restart (START_STICKY, e.g. after a
+     // crash) never overwrites the crash breadcrumb of the previous session (which lives in "crumb").
+     boot("factory build ${cfg()} enc=$encMode")
+     factory=PeerConnectionFactory.builder().setVideoEncoderFactory(encoderFactory).setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory();boot("factory ok")}
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int{
      if(intent?.action==ACTION_ACCEPT||intent?.action==ACTION_REJECT){respondPending(intent.getStringExtra(EXTRA_REQUEST_ID)?:"",intent.action==ACTION_ACCEPT);return START_STICKY}
      if(intent?.action==ACTION_STOP){stopProjection();return START_STICKY}
@@ -84,6 +84,8 @@ class RemoteAgentService : Service() {
     // Diagnostic breadcrumb: persisted synchronously so the LAST step reached before a crash
     // (even a native SIGSEGV the JVM can't catch) is visible on the next app launch.
     private fun crumb(s:String){try{getSharedPreferences("vremote",MODE_PRIVATE).edit().putString("crumb",s+" @"+(System.currentTimeMillis()/1000%100000)).commit()}catch(_:Throwable){}}
+    // Startup marker in a SEPARATE key so a service restart never clobbers the session crash breadcrumb.
+    private fun boot(s:String){try{getSharedPreferences("vremote",MODE_PRIVATE).edit().putString("boot",s+" @"+(System.currentTimeMillis()/1000%100000)).commit()}catch(_:Throwable){}}
     // The signaling server wraps the viewer's WebRTC messages as {type:"agent.signaling",payload:{...}};
     // unwrap it (the web agent does the same) so offer/candidate/leave actually reach us — top-level
     // offer/candidate kept as a fallback.
@@ -145,11 +147,4 @@ class RemoteAgentService : Service() {
     companion object{const val EXTRA_RESULT_CODE="resultCode";const val EXTRA_DATA="projectionData";private const val CHANNEL="vremote-agent";const val ACTION_ACCEPT="vn.vplus.vremote.ACCEPT";const val ACTION_REJECT="vn.vplus.vremote.REJECT";const val ACTION_STOP="vn.vplus.vremote.STOP";const val EXTRA_REQUEST_ID="requestId";@Volatile var projectionHeld=false}
 }
 private open class SimpleSdpObserver:SdpObserver{override fun onCreateSuccess(s:SessionDescription){};override fun onSetSuccess(){};override fun onCreateFailure(s:String){};override fun onSetFailure(s:String){}}
-// Breadcrumbs which encoder WebRTC actually creates (and that creation was reached) — delegates
-// everything to the real factory. Safe: for a native-backed inner factory the wrapper's createEncoder
-// still runs and forwards; the returned encoder keeps its own native backing.
-private class DiagEncoderFactory(private val inner:VideoEncoderFactory,private val crumb:(String)->Unit):VideoEncoderFactory{
-    override fun createEncoder(info:VideoCodecInfo):VideoEncoder?{crumb("enc:create ${info.name}");return try{inner.createEncoder(info)}catch(t:Throwable){crumb("enc:create FAIL ${t.message}");null}}
-    override fun getSupportedCodecs():Array<VideoCodecInfo> = inner.getSupportedCodecs()
-}
 private fun Intent.getParcelableExtraCompat(key:String):Intent?=if(Build.VERSION.SDK_INT>=33)getParcelableExtra(key,Intent::class.java)else @Suppress("DEPRECATION") getParcelableExtra(key)
