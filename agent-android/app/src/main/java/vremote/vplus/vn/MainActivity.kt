@@ -136,17 +136,17 @@ class MainActivity : Activity() {
         advanced.addView(requireAcceptBox)
 
         advanced.addView(Button(this).apply { text = "Dừng chia sẻ"; setOnClickListener { startAgentService(Intent(this@MainActivity, RemoteAgentService::class.java).setAction(RemoteAgentService.ACTION_STOP)); refreshReady(); toast("Đã dừng chia sẻ (vẫn nhận kết nối)") } })
-        // Encoder mode + capture quality are adjustable in-app so a weak box can be tuned WITHOUT a rebuild.
-        advanced.addView(label("Nếu app bị VĂNG hoặc lag khi kết nối: đổi chế độ mã hoá / hạ chất lượng rồi thử lại."))
-        val encBtn = Button(this).apply { text = encModeLabel() }
-        encBtn.setOnClickListener {
-            val next = if ((prefs().getString("encMode", "hw") ?: "hw") == "sw") "hw" else "sw"
-            prefs().edit().putString("encMode", next).apply()
-            encBtn.text = encModeLabel()
-            restartService(encBtn)
-            toast("Mã hoá: ${next.uppercase()}. Sẽ tự bật lại chia sẻ.")
+        // Video transport + capture quality are adjustable in-app so a weak box can be tuned WITHOUT a rebuild.
+        advanced.addView(label("Nếu app bị VĂNG hoặc lag khi kết nối: đổi Kiểu hình / hạ chất lượng rồi thử lại."))
+        val vmBtn = Button(this).apply { text = videoModeLabel() }
+        vmBtn.setOnClickListener {
+            val next = if ((prefs().getString("videoMode", "mjpeg") ?: "mjpeg") == "mjpeg") "vp8" else "mjpeg"
+            prefs().edit().putString("videoMode", next).apply()
+            vmBtn.text = videoModeLabel()
+            restartService(vmBtn)
+            toast("Kiểu hình: ${if (next == "mjpeg") "MJPEG (an toàn)" else "VP8"}. Sẽ tự bật lại chia sẻ.")
         }
-        advanced.addView(encBtn)
+        advanced.addView(vmBtn)
         val qualBtn = Button(this).apply { text = qualityLabel() }
         qualBtn.setOnClickListener {
             // Max long-edge (px). Capture keeps device aspect ratio; higher = sharper but heavier.
@@ -289,7 +289,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Thông tin thiết bị (đã copy)").setView(ScrollView(this).apply { addView(tv) }).setPositiveButton("Đóng", null).show()
         toast("Đã copy — gửi kỹ thuật")
     }
-    private fun encModeLabel(): String = "Mã hoá: ${(prefs().getString("encMode", "hw") ?: "hw").uppercase()} — bấm để đổi (SW/HW)"
+    private fun videoModeLabel(): String = "Kiểu hình: ${if ((prefs().getString("videoMode", "mjpeg") ?: "mjpeg") == "mjpeg") "MJPEG (an toàn)" else "VP8"} — bấm để đổi"
     private fun qualityLabel(): String = "Chất lượng: tối đa ${prefs().getInt("capMaxEdge", 640)}px — bấm để đổi"
     /** The encoder factory + capture size are read when the service (re)starts, so fully restart it to
      *  apply a new mode/quality. Projection is torn down → user re-grants with "Bật sẵn sàng". */
