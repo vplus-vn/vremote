@@ -47,6 +47,11 @@ class RemoteAgentService : Service() {
     private var mediaProjection: MediaProjection?=null; private var imageReader: ImageReader?=null; private var virtualDisplay: VirtualDisplay?=null
     private var captureThread: HandlerThread?=null; private var captureHandler: Handler?=null
     private var rgbaScratch: ByteArray?=null; private var yScratch: ByteArray?=null; private var uScratch: ByteArray?=null; private var vScratch: ByteArray?=null; private var lastFrameMs=0L; @Volatile private var frame1Logged=false
+    // videoMode picks the transport, so at least one path is guaranteed to run on any box:
+    //  "mjpeg" (default) — screen frames are JPEG-compressed with Android's Bitmap.compress and sent over
+    //          the WebRTC DataChannel; NO WebRTC video encoder / MediaCodec / GPU is involved, so it cannot
+    //          hit the RK3566 encoder faults. "vp8" — the WebRTC VideoTrack path (lighter, needs a working encoder).
+    private var videoMode="mjpeg"; private var jpegBmp:android.graphics.Bitmap?=null; private var jpegBmpW=0; private var jpegBmpH=0
     // Guards the capture->encoder frame path against a use-after-free: a frame being converted on the
     // capture thread must NEVER reach onFrameCaptured after the VideoSource is disposed. releaseCapture
     // clears this, removes the listener, and JOINS the capture thread before disposing the source.
@@ -80,7 +85,7 @@ class RemoteAgentService : Service() {
      // is libvpx VP8: pure C, no MediaCodec, no OMX, no GPU. Combined with the ImageReader CPU capture the
      // ENTIRE send path is now 100% software and never touches the Rockchip hardware codec or the Mali GPU.
      // (The MainActivity SW/HW toggle is inert in this build; HW will be re-offered once SW is confirmed.)
-     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode="sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640)
+     val p0=getSharedPreferences("vremote",MODE_PRIVATE);encMode="sw";capFps=p0.getInt("capFps",10);capMaxEdge=p0.getInt("capMaxEdge",640);videoMode=p0.getString("videoMode","mjpeg")?:"mjpeg"
      val encoderFactory:VideoEncoderFactory=SoftwareVideoEncoderFactory()
      // Startup markers go to a SEPARATE "boot" key so a service restart (START_STICKY, e.g. after a
      // crash) never overwrites the crash breadcrumb of the previous session (which lives in "crumb").
@@ -143,7 +148,7 @@ class RemoteAgentService : Service() {
       // Convert frames on a DEDICATED thread — the RGBA->I420 loop must never run on the main looper.
       val ct=HandlerThread("VRemoteCapture").apply{start()};captureThread=ct;val ch2=Handler(ct.looper);captureHandler=ch2
       // ImageReader fires at the display's refresh rate; throttle to capFps so the weak CPU keeps up.
-      ir.setOnImageAvailableListener({reader->val img=try{reader.acquireLatestImage()}catch(_:Throwable){null}?:return@setOnImageAvailableListener;try{val now=SystemClock.uptimeMillis();val gap=1000L/capFps.coerceIn(1,30);if(capturing&&now-lastFrameMs>=gap){lastFrameMs=now;pushI420(img,obs)}}catch(_:Throwable){}finally{try{img.close()}catch(_:Throwable){}}},ch2)
+      ir.setOnImageAvailableListener({reader->val img=try{reader.acquireLatestImage()}catch(_:Throwable){null}?:return@setOnImageAvailableListener;try{val now=SystemClock.uptimeMillis();val gap=1000L/capFps.coerceIn(1,30);if(capturing&&now-lastFrameMs>=gap){lastFrameMs=now;if(videoMode=="mjpeg")sendJpeg(img) else pushI420(img,obs)}}catch(_:Throwable){}finally{try{img.close()}catch(_:Throwable){}}},ch2)
       val dpi=resources.displayMetrics.densityDpi.coerceIn(120,640)
       virtualDisplay=mp.createVirtualDisplay("VRemote",capW,capH,dpi,DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,ir.surface,null,ch2)
      }catch(t:Throwable){crumb("proj:img FAIL ${t.message}");onProjectionRevoked();return false}
@@ -179,11 +184,30 @@ class RemoteAgentService : Service() {
      if(!frame1Logged){frame1Logged=true;crumb("push:frame1 ok")}
     }
     private fun fillPlane(dst:java.nio.ByteBuffer,stride:Int,src:ByteArray,w:Int,h:Int){if(stride==w){dst.position(0);dst.put(src,0,w*h)}else{var r=0;while(r<h){dst.position(r*stride);dst.put(src,r*w,w);r++}}}
+    // MJPEG transport: JPEG-compress the RGBA frame with Android's Bitmap.compress (rock-solid, no
+    // MediaCodec/GPU) and send it as a BINARY DataChannel message. The viewer draws it to a <canvas>.
+    // Guarded by the channel's OPEN state + bufferedAmount so we never outrun a slow link.
+    private fun sendJpeg(img:Image){
+     val dc=inputChannel?:return;if(dc.state()!=DataChannel.State.OPEN)return;if(dc.bufferedAmount()>256*1024L)return
+     val w=capW;val hgt=capH;if(w<=0||hgt<=0)return
+     val plane=img.planes.firstOrNull()?:return;val rowStride=plane.rowStride;val buf=plane.buffer;val bmpW=rowStride/4;if(bmpW<w)return
+     var bmp=jpegBmp;if(bmp==null||jpegBmpW!=bmpW||jpegBmpH!=hgt){try{bmp?.recycle()}catch(_:Throwable){};bmp=android.graphics.Bitmap.createBitmap(bmpW,hgt,android.graphics.Bitmap.Config.ARGB_8888);jpegBmp=bmp;jpegBmpW=bmpW;jpegBmpH=hgt}
+     buf.rewind();bmp.copyPixelsFromBuffer(buf)
+     val baos=java.io.ByteArrayOutputStream(48*1024)
+     val src=if(bmpW!=w)android.graphics.Bitmap.createBitmap(bmp,0,0,w,hgt) else bmp
+     src.compress(android.graphics.Bitmap.CompressFormat.JPEG,40,baos)
+     if(src!==bmp)try{src.recycle()}catch(_:Throwable){}
+     val bytes=baos.toByteArray()
+     if(!frame1Logged){frame1Logged=true;crumb("jpeg:frame1 ${w}x$hgt ${bytes.size}b")}
+     try{dc.send(DataChannel.Buffer(java.nio.ByteBuffer.wrap(bytes),true))}catch(_:Throwable){}
+    }
     // ICE servers are authoritatively supplied by session.enable's `iceServers`; parse null-safely.
     // Each element: {"urls": String|[String], "username"?, "credential"?}. Falls back to google STUN.
     private fun parseIceServers(arr:JSONArray?):List<PeerConnection.IceServer>{val out=mutableListOf<PeerConnection.IceServer>();if(arr!=null)for(i in 0 until arr.length()){val o=arr.optJSONObject(i)?:continue;val urls=mutableListOf<String>();when(val u=o.opt("urls")){is String->if(u.isNotBlank())urls.add(u);is JSONArray->for(j in 0 until u.length()){val s=u.optString(j);if(s.isNotBlank())urls.add(s)}};if(urls.isEmpty())continue;val b=PeerConnection.IceServer.builder(urls);val user=o.optString("username","");val cred=o.optString("credential","");if(user.isNotEmpty()&&cred.isNotEmpty()){b.setUsername(user);b.setPassword(cred)};try{out.add(b.createIceServer())}catch(_:Throwable){}};return out}
     // Per-session PeerConnection with a NEW VideoTrack from the PERSISTENT source.
-    private fun newSessionPeer():Boolean{val src=source?:return false;val servers=if(activeIceServers.isNotEmpty())activeIceServers else listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());crumb("peer:createPC ice=${servers.size}");val pc=factory.createPeerConnection(servers,observer())?:return false;peer=pc;crumb("peer:createTrack");val track=factory.createVideoTrack("screen"+SystemClock.uptimeMillis(),src);sessionTrack=track;crumb("peer:addTrack");pc.addTrack(track,listOf("screen"));crumb("peer:addTrack ok");return true}
+    private fun newSessionPeer():Boolean{val src=source?:return false;val servers=if(activeIceServers.isNotEmpty())activeIceServers else listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());crumb("peer:createPC ice=${servers.size}");val pc=factory.createPeerConnection(servers,observer())?:return false;peer=pc
+     // MJPEG mode sends frames over the DataChannel, so it adds NO WebRTC video track; VP8 mode adds one.
+     if(videoMode=="vp8"){crumb("peer:createTrack");val track=factory.createVideoTrack("screen"+SystemClock.uptimeMillis(),src);sessionTrack=track;crumb("peer:addTrack");pc.addTrack(track,listOf("screen"));crumb("peer:addTrack ok")}else crumb("peer:mjpeg no-track");return true}
     private fun observer()=object:PeerConnection.Observer{override fun onIceCandidate(c:IceCandidate){sendSignal(JSONObject().put("type","agent.signaling").put("sessionId",activeSession).put("payload",JSONObject().put("type","candidate").put("sessionId",activeSession).put("candidate",JSONObject().put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex).put("candidate",c.sdp))))};override fun onSignalingChange(s:PeerConnection.SignalingState){};override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){crumb("ice:$s")};override fun onIceConnectionReceivingChange(b:Boolean){};override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){};override fun onIceCandidatesRemoved(c:Array<IceCandidate>){};override fun onAddStream(s:MediaStream){};override fun onRemoveStream(s:MediaStream){};override fun onDataChannel(d:DataChannel){inputChannel=d;d.registerObserver(object:DataChannel.Observer{override fun onBufferedAmountChange(p:Long){};override fun onStateChange(){if(d.state()==DataChannel.State.OPEN)sendControlStatus(d)};override fun onMessage(buf:DataChannel.Buffer){try{val b=buf.data;val bytes=ByteArray(b.remaining());b.get(bytes);onInput(String(bytes,StandardCharsets.UTF_8))}catch(_:Throwable){}}})};override fun onRenegotiationNeeded(){};override fun onAddTrack(r:RtpReceiver,m:Array<MediaStream>){};override fun onConnectionChange(s:PeerConnection.PeerConnectionState){crumb("conn:$s");if(s==PeerConnection.PeerConnectionState.FAILED||s==PeerConnection.PeerConnectionState.CLOSED)handler.post{endSession()}};override fun onSelectedCandidatePairChanged(e:CandidatePairChangeEvent){}}
     private fun cacheScreenSize(){try{val wm=getSystemService(WindowManager::class.java);if(Build.VERSION.SDK_INT>=30){val b=wm.currentWindowMetrics.bounds;screenW=b.width();screenH=b.height()}else{val dm=DisplayMetrics();@Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(dm);screenW=dm.widthPixels;screenH=dm.heightPixels}}catch(_:Throwable){}}
     // Decode one input event (normalized 0..1 coords) and route injection to the AccessibilityService on the main thread.
@@ -255,6 +279,7 @@ class RemoteAgentService : Service() {
      val ct=captureThread;captureThread=null;captureHandler=null
      if(ct!=null)try{ct.quitSafely();ct.join(1000)}catch(_:Throwable){}
      try{source?.dispose()}catch(_:Throwable){};source=null
+     try{jpegBmp?.recycle()}catch(_:Throwable){};jpegBmp=null;jpegBmpW=0;jpegBmpH=0
     }
     private fun stopProjection(){endSession();releaseCapture();projectionIntent=null;projectionHeld=false;startFgSignaling()}
     // User revoked capture (or it failed): clear it, tell the user to reopen the app to re-grant.
