@@ -47,6 +47,10 @@ class RemoteAgentService : Service() {
     private var mediaProjection: MediaProjection?=null; private var imageReader: ImageReader?=null; private var virtualDisplay: VirtualDisplay?=null
     private var captureThread: HandlerThread?=null; private var captureHandler: Handler?=null
     private var rgbaScratch: ByteArray?=null; private var yScratch: ByteArray?=null; private var uScratch: ByteArray?=null; private var vScratch: ByteArray?=null; private var lastFrameMs=0L; @Volatile private var frame1Logged=false
+    // Guards the capture->encoder frame path against a use-after-free: a frame being converted on the
+    // capture thread must NEVER reach onFrameCaptured after the VideoSource is disposed. releaseCapture
+    // clears this, removes the listener, and JOINS the capture thread before disposing the source.
+    @Volatile private var capturing=false
     private var activeSession:String?=null; private var activeCapability:String?=null; private var activeIceServers:List<PeerConnection.IceServer> = emptyList(); private var inputChannel:DataChannel?=null; private var screenW=0; private var screenH=0; private var projectionIntent:Intent?=null; private var expiryTask:Runnable?=null; @Volatile private var destroyed=false; private var polling=false; private var shownRequest:String?=null; private val notifId=2; private val consentNotifId=3
     private val seenNonces=ConcurrentHashMap.newKeySet<String>(); private val processedCommands=ConcurrentHashMap.newKeySet<String>(); private val handler=Handler(Looper.getMainLooper())
     // Encoder mode ("sw"/"hw") + capture size are pref-driven so the combo that survives this box's
@@ -101,7 +105,7 @@ class RemoteAgentService : Service() {
     private fun pollPendingOnce(){val p=getSharedPreferences("vremote",MODE_PRIVATE);val base=p.getString("baseUrl","https://vremote.vplus.vn")?:"";val id=p.getString("deviceId","")?:"";val tok=p.getString("deviceToken","")?:"";if(id.isEmpty()||tok.isEmpty())return;Thread{try{val pend=ApiClient.pending(base,id,tok);handler.post{if(pend==null){if(shownRequest!=null){shownRequest=null;getSystemService(NotificationManager::class.java).cancel(notifId)}}else if(pend.requestId!=shownRequest){shownRequest=pend.requestId;showAcceptNotification(pend)}}}catch(_:Throwable){}}.start()}
     private fun showAcceptNotification(p:ApiClient.Pending){val f=PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE;val yes=PendingIntent.getService(this,1,Intent(this,RemoteAgentService::class.java).setAction(ACTION_ACCEPT).putExtra(EXTRA_REQUEST_ID,p.requestId),f);val no=PendingIntent.getService(this,2,Intent(this,RemoteAgentService::class.java).setAction(ACTION_REJECT).putExtra(EXTRA_REQUEST_ID,p.requestId),f);val n=Notification.Builder(this,CHANNEL).setContentTitle("Yêu cầu kết nối").setContentText("“${p.actor}” muốn xem màn hình.").setSmallIcon(android.R.drawable.ic_menu_view).addAction(android.R.drawable.ic_menu_view,"Đồng ý",yes).addAction(android.R.drawable.ic_menu_close_clear_cancel,"Từ chối",no).setAutoCancel(true).build();getSystemService(NotificationManager::class.java).notify(notifId,n)}
     private fun respondPending(rid:String,accept:Boolean){shownRequest=null;getSystemService(NotificationManager::class.java).cancel(notifId);if(rid.isEmpty())return;val p=getSharedPreferences("vremote",MODE_PRIVATE);val base=p.getString("baseUrl","https://vremote.vplus.vn")?:"";val id=p.getString("deviceId","")?:"";val tok=p.getString("deviceToken","")?:"";Thread{try{ApiClient.respond(base,id,tok,rid,accept)}catch(_:Throwable){}}.start()}
-    private fun connect(){val p=getSharedPreferences("vremote",MODE_PRIVATE);val id=p.getString("deviceId","")?:"";val token=p.getString("deviceToken","")?:"";val url=p.getString("signalingUrl","ws://10.0.2.2:8787/agent")?:"";socket=OkHttpClient.Builder().pingInterval(20,TimeUnit.SECONDS).build().newWebSocket(Request.Builder().url(url).build(),object:WebSocketListener(){override fun onOpen(w:WebSocket,r:Response){w.send(JSONObject().put("type","agent.auth").put("deviceId",id).put("deviceToken",token).toString());w.send(JSONObject().put("type","agent.hello").put("deviceId",id).put("agentVersion",BuildConfig.VERSION_NAME).put("platform","android").put("capabilities",listOf("screen.view","screen.control")).toString())};override fun onMessage(w:WebSocket,text:String){try{handle(JSONObject(text))}catch(_:Throwable){}};override fun onFailure(w:WebSocket,t:Throwable,r:Response?){handler.postDelayed({if(!destroyed)try{connect()}catch(_:Throwable){}},5000)}})}
+    private fun connect(){val p=getSharedPreferences("vremote",MODE_PRIVATE);val id=p.getString("deviceId","")?:"";val token=p.getString("deviceToken","")?:"";val url=p.getString("signalingUrl","ws://10.0.2.2:8787/agent")?:"";socket=OkHttpClient.Builder().pingInterval(20,TimeUnit.SECONDS).build().newWebSocket(Request.Builder().url(url).build(),object:WebSocketListener(){override fun onOpen(w:WebSocket,r:Response){w.send(JSONObject().put("type","agent.auth").put("deviceId",id).put("deviceToken",token).toString());w.send(JSONObject().put("type","agent.hello").put("deviceId",id).put("agentVersion",BuildConfig.VERSION_NAME).put("platform","android").put("capabilities",listOf("screen.view","screen.control")).toString())};override fun onMessage(w:WebSocket,text:String){val m=try{JSONObject(text)}catch(_:Throwable){return};handler.post{if(!destroyed)try{handle(m)}catch(_:Throwable){}}};override fun onFailure(w:WebSocket,t:Throwable,r:Response?){handler.postDelayed({if(!destroyed)try{connect()}catch(_:Throwable){}},5000)}})}
     // Diagnostic breadcrumb: persisted synchronously so the LAST step reached before a crash
     // (even a native SIGSEGV the JVM can't catch) is visible on the next app launch.
     private fun crumb(s:String){try{getSharedPreferences("vremote",MODE_PRIVATE).edit().putString("crumb",s+" @"+(System.currentTimeMillis()/1000%100000)).commit()}catch(_:Throwable){}}
@@ -139,15 +143,16 @@ class RemoteAgentService : Service() {
       // Convert frames on a DEDICATED thread — the RGBA->I420 loop must never run on the main looper.
       val ct=HandlerThread("VRemoteCapture").apply{start()};captureThread=ct;val ch2=Handler(ct.looper);captureHandler=ch2
       // ImageReader fires at the display's refresh rate; throttle to capFps so the weak CPU keeps up.
-      ir.setOnImageAvailableListener({reader->val img=try{reader.acquireLatestImage()}catch(_:Throwable){null}?:return@setOnImageAvailableListener;try{val now=SystemClock.uptimeMillis();val gap=1000L/capFps.coerceIn(1,30);if(now-lastFrameMs>=gap){lastFrameMs=now;pushI420(img,obs)}}catch(_:Throwable){}finally{try{img.close()}catch(_:Throwable){}}},ch2)
+      ir.setOnImageAvailableListener({reader->val img=try{reader.acquireLatestImage()}catch(_:Throwable){null}?:return@setOnImageAvailableListener;try{val now=SystemClock.uptimeMillis();val gap=1000L/capFps.coerceIn(1,30);if(capturing&&now-lastFrameMs>=gap){lastFrameMs=now;pushI420(img,obs)}}catch(_:Throwable){}finally{try{img.close()}catch(_:Throwable){}}},ch2)
       val dpi=resources.displayMetrics.densityDpi.coerceIn(120,640)
       virtualDisplay=mp.createVirtualDisplay("VRemote",capW,capH,dpi,DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,ir.surface,null,ch2)
      }catch(t:Throwable){crumb("proj:img FAIL ${t.message}");onProjectionRevoked();return false}
-     crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
+     capturing=true;crumb("proj:capturing ${cfg()}");projectionHeld=true;getSystemService(NotificationManager::class.java).cancel(consentNotifId);return true}
     // Convert one RGBA_8888 screen frame to I420 on the CPU (BT.601, full 2x2 chroma subsample) and push
     // it to the VideoSource. Uses reusable scratch arrays + bulk ByteBuffer copies so a weak box keeps up
     // at the modest capFps. No GL anywhere — this is the whole point of the ImageReader path.
     private fun pushI420(img:Image,obs:CapturerObserver){
+     if(!capturing)return
      val w=capW;val hgt=capH;if(w<=0||hgt<=0)return
      val plane=img.planes.firstOrNull()?:return;val rowStride=plane.rowStride;val pxStride=plane.pixelStride;val buf=plane.buffer
      val n=buf.remaining();var rgba=rgbaScratch;if(rgba==null||rgba.size<n){rgba=ByteArray(n);rgbaScratch=rgba};buf.get(rgba,0,n)
@@ -237,7 +242,20 @@ class RemoteAgentService : Service() {
     // Explicit "Dừng": drop the projection but stay reachable on signaling.
     // Tear down the ImageReader capture pipeline (order: stop frames, close reader, stop projection,
     // dispose source). All null-safe so it's reusable from the startProjection failure path too.
-    private fun releaseCapture(){try{virtualDisplay?.release()}catch(_:Throwable){};virtualDisplay=null;try{imageReader?.close()}catch(_:Throwable){};imageReader=null;try{mediaProjection?.stop()}catch(_:Throwable){};mediaProjection=null;try{captureThread?.quitSafely()}catch(_:Throwable){};captureThread=null;captureHandler=null;try{source?.dispose()}catch(_:Throwable){};source=null}
+    // Ordered teardown to prevent a use-after-free: (1) stop new frame pushes and remove the listener so
+    // no further callbacks fire, (2) tear down the projection/reader, (3) JOIN the capture thread so any
+    // in-flight pushI420 has fully returned, and ONLY THEN (4) dispose the VideoSource. Always runs on the
+    // main thread (stop/onProjectionRevoked/onDestroy), so the join never deadlocks the capture thread.
+    private fun releaseCapture(){
+     capturing=false
+     try{imageReader?.setOnImageAvailableListener(null,null)}catch(_:Throwable){}
+     try{virtualDisplay?.release()}catch(_:Throwable){};virtualDisplay=null
+     try{imageReader?.close()}catch(_:Throwable){};imageReader=null
+     try{mediaProjection?.stop()}catch(_:Throwable){};mediaProjection=null
+     val ct=captureThread;captureThread=null;captureHandler=null
+     if(ct!=null)try{ct.quitSafely();ct.join(1000)}catch(_:Throwable){}
+     try{source?.dispose()}catch(_:Throwable){};source=null
+    }
     private fun stopProjection(){endSession();releaseCapture();projectionIntent=null;projectionHeld=false;startFgSignaling()}
     // User revoked capture (or it failed): clear it, tell the user to reopen the app to re-grant.
     private fun onProjectionRevoked(){endSession();releaseCapture();projectionIntent=null;projectionHeld=false;startFgSignaling();notifyConsentNeeded()}
