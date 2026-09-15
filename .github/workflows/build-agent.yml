@@ -20,6 +20,10 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # Skip the action's default `sdkmanager tools` — Google removed the obsolete `tools`
+          # package, so the default install now fails ("Failed to find package 'tools'").
+          packages: ''
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
