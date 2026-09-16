@@ -108,22 +108,19 @@ class RemoteAgentService : Service() {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
         )
-        egl = EglBase.create()
-
         val p = getSharedPreferences("vremote", MODE_PRIVATE)
         capFps = p.getInt("capFps", 10).coerceIn(1, 30)
         capMaxEdge = p.getInt("capMaxEdge", 640).coerceAtLeast(160)
         videoMode = p.getString("videoMode", "mjpeg") ?: "mjpeg"
         if (videoMode != "mjpeg" && videoMode != "vp8") videoMode = "mjpeg"
 
-        boot("factory build ${cfg()}")
-        // Decoder factory is retained for browser-side inbound negotiation, while the default MJPEG
-        // mode has no outgoing WebRTC video track and therefore never instantiates an encoder.
+        // RK3566 safety: MJPEG does not need WebRTC codec factories. The previous build still
+        // constructed SoftwareVideoEncoderFactory() here and could crash before MJPEG ran.
+        videoMode = "mjpeg"
+        boot("factory build ${cfg()} no-encoder")
         factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(SoftwareVideoEncoderFactory())
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory()
-        boot("factory ok")
+        boot("factory ok no-encoder")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
