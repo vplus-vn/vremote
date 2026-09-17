@@ -1,8 +1,9 @@
 name: Build Android Agent
 
-# Standalone agent APK build — for fast iteration without a full production deploy,
-# and to hand the APK to anyone from the Actions "Artifacts" section.
-# Runs on demand from any branch, and automatically when the agent sources change.
+# Standalone agent APK build on the organization's self-hosted runner.
+# Mirrors vborder-web CI: the runner is the server-side [self-hosted, node] runner,
+# so Android builds do not consume GitHub-hosted Actions minutes.
+# The APK is still uploaded as a GitHub Actions artifact for the existing download flow.
 on:
   workflow_dispatch:
   push:
@@ -12,7 +13,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, node]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -51,7 +52,6 @@ jobs:
           fi
       - name: Stage APK as vremote-agent.apk
         run: cp "agent-android/${AGENT_APK}" vremote-agent.apk
-      # Version manifest for the in-app updater; derived from the built APK so it can't drift.
       - name: Generate version manifest (vremote-agent.json)
         run: |
           set -euo pipefail
@@ -59,9 +59,6 @@ jobs:
           BADGE="$("$AAPT" dump badging vremote-agent.apk)"
           VCODE="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n1)"
           VNAME="$(printf '%s\n' "$BADGE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
-          # Publish ONLY a version-stamped APK (vremote_<versionName>.apk) so every download is
-          # distinguishable by version; the manifest + in-app updater point at it. vremote-agent.apk
-          # is just a build-time working file (for aapt), not published.
           cp vremote-agent.apk "vremote_${VNAME}.apk"
           printf '{"versionCode": %s, "versionName": "%s", "url": "/downloads/vremote_%s.apk", "notes": ""}\n' "$VCODE" "$VNAME" "$VNAME" > vremote-agent.json
           cat vremote-agent.json
