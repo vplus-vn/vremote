@@ -1,8 +1,7 @@
 name: VRemote CI
 
 # CI runs on the organization's self-hosted runner, following the vborder-web model.
-# The runner is registered on the server and uses the `node` label.
-# No GitHub-hosted runner minutes are consumed by CI jobs.
+# The server runner is expected to provide PHP 8.3 + MongoDB extension + Composer.
 on:
   push:
     branches: [main, 'feat/**']
@@ -21,10 +20,13 @@ jobs:
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: mongodb
+      - name: Verify self-hosted PHP runtime
+        run: |
+          set -euo pipefail
+          php -v
+          php -r 'exit(PHP_VERSION_ID >= 80300 && PHP_VERSION_ID < 80400 ? 0 : 1);'
+          php -m | grep -qi '^mongodb$'
+          composer --version
       - name: Configure GitHub authentication for private Composer repositories
         env:
           COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
