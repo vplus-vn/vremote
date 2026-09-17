@@ -1,0 +1,35 @@
+name: Issue 148 MJPEG offer fix
+on:
+  push:
+    branches:
+      - fix/issue-148-mjpeg-offer-no-video
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-148-mjpeg-offer-no-video
+          fetch-depth: 0
+      - name: Patch MJPEG viewer offer
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('console/src/main.tsx')
+          s=p.read_text()
+          old="const offer=await peer.createOffer({offerToReceiveVideo:true});"
+          new="const offer=await peer.createOffer();"
+          if old not in s:
+              raise SystemExit('target createOffer line not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add console/src/main.tsx
+          git commit -m 'fix: avoid video m-line in MJPEG viewer offer'
+          git push origin HEAD:fix/issue-148-mjpeg-offer-no-video
