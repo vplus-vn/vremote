@@ -72,7 +72,7 @@ val hardenIssue148 by tasks.registering {
                                             )
                                         }
                                     }
-                                    crumb("offer:local ok ${cfg()}")
+                                    crumb("offer:local ok ${'$'}{cfg()}")
                                 }"""
         if (oldSuccess in s) s = s.replace(oldSuccess, newSuccess)
 
