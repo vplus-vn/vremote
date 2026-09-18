@@ -312,7 +312,9 @@ class RemoteAgentService : Service() {
         flow("enable cap=$cap source=${source != null} mode=$videoMode")
         expiryTask = Runnable { if (activeSession == sid) endSession() }
         handler.postDelayed(expiryTask!!, ttl * 1000L)
-        if (source == null) {
+        // MJPEG uses ImageReader -> JPEG -> DataChannel and must not require a WebRTC VideoSource.
+        // Only the explicit VP8 fallback needs the WebRTC source created by startProjection().
+        if (videoMode == "vp8" && source == null) {
             notifyConsentNeeded()
             return
         }
@@ -325,9 +327,16 @@ class RemoteAgentService : Service() {
         if (source != null) return true
         val data = projectionIntent ?: return false
         frame1Logged = false
-        crumb("proj:createSource")
-        val src = factory.createVideoSource(true)
-        source = src
+        // MJPEG is deliberately independent of WebRTC media sources. Creating a VideoSource
+        // touches the native WebRTC media pipeline even though MJPEG never adds a VideoTrack.
+        // On RK3566 this is an unnecessary native-crash surface. Create it only for VP8 fallback.
+        val src = if (videoMode == "vp8") {
+            crumb("proj:createSource vp8")
+            factory.createVideoSource(true).also { source = it }
+        } else {
+            crumb("proj:createSource skipped mjpeg")
+            null
+        }
         startFgProjection()
         crumb("proj:startCapture")
         computeCaptureSize()
@@ -345,8 +354,8 @@ class RemoteAgentService : Service() {
             }, handler)
             val ir = ImageReader.newInstance(capW, capH, PixelFormat.RGBA_8888, 3)
             imageReader = ir
-            val obs = src.capturerObserver
-            obs.onCapturerStarted(true)
+            val obs = src?.capturerObserver
+            obs?.onCapturerStarted(true)
             val ct = HandlerThread("VRemoteCapture").apply { start() }
             captureThread = ct
             val ch2 = Handler(ct.looper)
@@ -358,7 +367,7 @@ class RemoteAgentService : Service() {
                     val gap = 1000L / capFps.coerceIn(1, 30)
                     if (capturing && now - lastFrameMs >= gap) {
                         lastFrameMs = now
-                        if (videoMode == "mjpeg") sendJpeg(img) else pushI420(img, obs)
+                        if (videoMode == "mjpeg") sendJpeg(img) else if (obs != null) pushI420(img, obs)
                     }
                 } catch (_: Throwable) {
                 } finally {
@@ -518,7 +527,8 @@ class RemoteAgentService : Service() {
     }
 
     private fun newSessionPeer(): Boolean {
-        val src = source ?: return false
+        val src = source
+        if (videoMode == "vp8" && src == null) return false
         val servers = if (activeIceServers.isNotEmpty()) activeIceServers
         else listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
         crumb("peer:createPC ice=${servers.size}")
@@ -627,7 +637,7 @@ class RemoteAgentService : Service() {
         val sdp = m.optString("sdp")
         if (sdp.isBlank()) return
         if (peer == null) {
-            if (activeSession == null || source == null || !newSessionPeer()) return
+            if (activeSession == null || !newSessionPeer()) return
         }
         // In MJPEG mode the SDP should not negotiate a video m-line because the agent does not
         // create a video track. The browser still creates a data channel for the JPEG frames/control.
