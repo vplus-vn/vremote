@@ -25,9 +25,8 @@ android { namespace = "vremote.vplus.vn"; compileSdk = 35
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
-// Issue #148 hardening is applied at build time so every CI-produced APK contains the fix.
-// Keep this narrowly scoped to the known service source; it is idempotent and fails fast if
-// the expected old code is no longer present, preventing a silent partial patch.
+// Issue #148 hardening is applied at build time so the CI-produced APK contains the fix.
+// The task is idempotent and fails fast if the expected service source is missing.
 val hardenIssue148 by tasks.registering {
     doLast {
         val p = file("src/main/java/vremote/vplus/vn/RemoteAgentService.kt")
@@ -40,44 +39,42 @@ val hardenIssue148 by tasks.registering {
         val newField = oldField + "    private val pendingIceCandidates = ArrayList<IceCandidate>()\n    @Volatile private var localDescriptionReady = false\n"
         if (oldField in s && "pendingIceCandidates" !in s) s = s.replace(oldField, newField)
 
-        s = s.replace(
-            """        override fun onIceCandidate(c: IceCandidate) {
-            sendSignal(""",
-            """        override fun onIceCandidate(c: IceCandidate) {
-            // Do not deliver remote ICE candidates until the local SDP is committed.
-            // The previous ordering allowed candidate traffic to race setLocalDescription
-            // on RK3566/libwebrtc and was correlated with the native network-thread abort.
+        val oldIce = """        override fun onIceCandidate(c: IceCandidate) {
+            sendSignal("""
+        val newIce = """        override fun onIceCandidate(c: IceCandidate) {
             synchronized(pendingIceCandidates) {
                 if (!localDescriptionReady) {
                     pendingIceCandidates.add(c)
-                    crumb(\"ice:queued\")
+                    crumb("ice:queued")
                     return
                 }
             }
             sendSignal("""
-        )
+        if (oldIce in s && "ice:queued" !in s) s = s.replace(oldIce, newIce)
 
-        s = s.replace("        crumb(\"offer:setRemote\")", "        localDescriptionReady = false\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n        crumb(\"offer:setRemote\")")
+        val oldRemote = "        crumb(\"offer:setRemote\")"
+        val newRemote = "        localDescriptionReady = false\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n        crumb(\"offer:setRemote\")"
+        if (oldRemote in s && "pendingIceCandidates.clear()" !in s) s = s.replace(oldRemote, newRemote)
 
-        val success = """override fun onSetSuccess() { crumb(\"offer:local ok ${cfg()}\") }"""
-        val successFixed = """override fun onSetSuccess() {
+        val oldSuccess = "override fun onSetSuccess() { crumb(\"offer:local ok ${cfg()}\") }"
+        val newSuccess = """override fun onSetSuccess() {
                                     localDescriptionReady = true
                                     synchronized(pendingIceCandidates) {
                                         val queued = pendingIceCandidates.toList()
                                         pendingIceCandidates.clear()
                                         queued.forEach { candidate ->
                                             sendSignal(
-                                                JSONObject().put(\"type\", \"agent.signaling\").put(\"sessionId\", activeSession).put(
-                                                    \"payload\", JSONObject().put(\"type\", \"candidate\").put(\"sessionId\", activeSession).put(
-                                                        \"candidate\", JSONObject().put(\"sdpMid\", candidate.sdpMid).put(\"sdpMLineIndex\", candidate.sdpMLineIndex).put(\"candidate\", candidate.sdp)
+                                                JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                                    "payload", JSONObject().put("type", "candidate").put("sessionId", activeSession).put(
+                                                        "candidate", JSONObject().put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex).put("candidate", candidate.sdp)
                                                     )
                                                 )
                                             )
                                         }
                                     }
-                                    crumb(\"offer:local ok ${cfg()}\")
+                                    crumb("offer:local ok ${cfg()}")
                                 }"""
-        if (success in s) s = s.replace(success, successFixed)
+        if (oldSuccess in s) s = s.replace(oldSuccess, newSuccess)
 
         p.writeText(s)
     }
