@@ -56,7 +56,7 @@ val hardenIssue148 by tasks.registering {
         val newRemote = "        localDescriptionReady = false\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n        crumb(\"offer:setRemote\")"
         if (oldRemote in s && "pendingIceCandidates.clear()" !in s) s = s.replace(oldRemote, newRemote)
 
-        val oldSuccess = "override fun onSetSuccess() { crumb(\"offer:local ok ${cfg()}\") }"
+        val oldSuccess = "override fun onSetSuccess() { crumb(\"offer:local ok ${'$'}{cfg()}\") }"
         val newSuccess = """override fun onSetSuccess() {
                                     localDescriptionReady = true
                                     synchronized(pendingIceCandidates) {
