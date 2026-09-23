@@ -11,6 +11,7 @@ use App\Domain\Platform\PlatformContext;
 use App\Domain\Support\Clock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Platform\Core\Http\ApiResponder;
 
 /**
  * Device registry API. Reads the durable device store (MongoDB in production, the
@@ -217,8 +218,9 @@ final class DeviceController
         return null;
     }
 
+    // [v0.1.1] Chuẩn hoá core-lib — dựng envelope lỗi bằng core-lib ApiResponder (2026-09-23)
     private function error(string $code, string $message, int $status): JsonResponse
     {
-        return response()->json(['error' => ['code' => $code, 'message' => $message]], $status);
+        return ApiResponder::fail($code, $message, [], $status);
     }
 }

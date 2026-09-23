@@ -1,0 +1,66 @@
+name: Test (backend + console)
+
+# [v0.1.1] Chuẩn hoá core-lib/API v1 — cổng test cho PR vào develop/main (2026-09-23)
+# Chạy trên self-hosted runner của org (như deploy-production.yml) — không tiêu Actions minutes
+# (lý do ci.yml cũ bị gỡ ở #11). Chỉ chạy khi PR đụng backend/console/api.
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'backend/**'
+      - 'console/**'
+      - 'api/**'
+      - '.github/workflows/test-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: test-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify self-hosted PHP runtime
+        run: |
+          set -euo pipefail
+          php -v
+          php -m | grep -qi '^mongodb$'
+          composer --version
+      - name: Install dependencies (private core-lib via COMPOSER_TOKEN)
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
+          COMPOSER_ALLOW_SUPERUSER: '1'
+        run: |
+          set -euo pipefail
+          export COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"${COMPOSER_TOKEN}\"}}"
+          # Giống deploy-production.yml: lock hiện chứa symfony 8.x (PHP >= 8.4.1); runner PHP 8.3
+          # rơi về `composer update` để resolve bản tương thích.
+          composer install --no-interaction --prefer-dist \
+            || composer update --no-interaction --prefer-dist
+      - name: Lint PHP syntax
+        run: find app config routes bootstrap tests -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+      - name: Unit + HTTP tests
+        run: vendor/bin/phpunit
+      - name: Route list + config cache smoke
+        run: |
+          set -euo pipefail
+          php artisan route:list --path=api/vremote
+          cp .env.example .env 2>/dev/null || echo "APP_KEY=" > .env
+          php artisan key:generate --force
+          php artisan config:cache
+          php artisan config:clear
+          rm -f .env
+
+  console:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: console } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
