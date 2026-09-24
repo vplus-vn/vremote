@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0c0a7807ff50a93ad0e79e1195128c8d",
+    "content-hash": "1a211568c7a91254316b643bcedac16d",
     "packages": [
         {
             "name": "brick/math",
@@ -6445,24 +6445,25 @@
             "source": {
                 "type": "git",
                 "url": "git@github.com:vplus-platform/core-lib.git",
-                "reference": "74932577284541e33c4ed40413b8072f2f352fce"
+                "reference": "a0a984dc5a2ce333c86501cbebb3434fc6f96f9f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/vplus-platform/core-lib/zipball/74932577284541e33c4ed40413b8072f2f352fce",
-                "reference": "74932577284541e33c4ed40413b8072f2f352fce",
+                "url": "https://api.github.com/repos/vplus-platform/core-lib/zipball/a0a984dc5a2ce333c86501cbebb3434fc6f96f9f",
+                "reference": "a0a984dc5a2ce333c86501cbebb3434fc6f96f9f",
                 "shasum": ""
             },
             "require": {
                 "ext-json": "*",
                 "ext-openssl": "*",
-                "guzzlehttp/guzzle": "^7.8",
+                "guzzlehttp/guzzle": "^7.8 || ^8.0",
                 "php": "^8.3"
             },
             "require-dev": {
+                "firebase/php-jwt": "^7.0",
                 "laravel/pint": "^1.13",
-                "orchestra/testbench": "^10.0",
-                "phpunit/phpunit": "^11.0"
+                "orchestra/testbench": "^10.0 || ^11.0",
+                "phpunit/phpunit": "^11.0 || ^12.0"
             },
             "suggest": {
                 "firebase/php-jwt": "Cần khi dùng CheckAuthMiddleware (verify JWT RS256). Host tự chọn version đã vá advisory.",
@@ -6497,7 +6498,7 @@
                 "source": "https://github.com/vplus-platform/core-lib/tree/main",
                 "issues": "https://github.com/vplus-platform/core-lib/issues"
             },
-            "time": "2026-09-11T12:27:55+00:00"
+            "time": "2026-09-23T14:33:36+00:00"
         },
         {
             "name": "wikimedia/composer-merge-plugin",
@@ -8642,5 +8643,8 @@
         "php": "^8.3"
     },
     "platform-dev": {},
+    "platform-overrides": {
+        "php": "8.3.33"
+    },
     "plugin-api-version": "2.6.0"
 }

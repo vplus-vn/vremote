@@ -32,6 +32,8 @@ final class TransferServiceTest extends TestCase
             public array $d = ['DEV-1' => ['deviceId' => 'DEV-1', 'ownerTenantId' => 'T-A']];
             public function get(string $id): ?array { return $this->d[$id] ?? null; }
             public function findByMachineCode(string $m): ?array { return null; }
+            public function findByPairingId(string $pairingId): ?array { return null; }
+            public function delete(string $deviceId): void {}
             public function list(array $f = [], int $l = 50): array { return array_values($this->d); }
             public function save(array $x): void { $this->d[$x['deviceId']] = $x; }
             public function update(string $id, array $f): void { $this->d[$id] = array_merge($this->d[$id] ?? ['deviceId' => $id], $f); }
