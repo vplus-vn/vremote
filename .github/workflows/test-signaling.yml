@@ -25,4 +25,4 @@ jobs:
           cache-dependency-path: signaling/package-lock.json
       - run: npm ci
       - run: npm run build
-      - run: npm test -- --runInBand
+      - run: npm test
