@@ -14,9 +14,9 @@ type Grant={sessionId:string;capability:string;signalingUrl:string;sessionToken:
 function iceSafe(servers:RTCIceServer[]):RTCIceServer[]{return (servers||[]).filter(s=>{const urls=Array.isArray(s.urls)?s.urls:[s.urls];const needsCred=urls.some(u=>/^turns?:/i.test(String(u)));return !needsCred||(!!s.username&&!!s.credential);});}
 const agentDownloadUrl=import.meta.env.VITE_AGENT_DOWNLOAD_URL??'/downloads/vremote-agent.apk';
 const TOKEN_KEY='vremote_token';
-// [v0.1.1] Chuẩn hoá API v1 — console opt-in envelope chuẩn {data}/{error} qua header X-Api-Envelope (2026-09-23)
+
+// API v1 envelope opt-in
 const ENVELOPE_HEADER='X-Api-Envelope';
-// Đọc body JSON và bóc `data` của envelope; body lỗi ({error}) / body cũ (không envelope) trả nguyên.
 async function readData(r:Response):Promise<any>{const j:any=await r.json().catch(()=>({}));return j&&typeof j==='object'&&!('error' in j)&&'data' in j?j.data:j;}
 
 // Auth is packaged into VRemote (like the S&B admin portal): the console logs in through
@@ -169,7 +169,7 @@ function App(){
  async function genEnroll(deviceId:string){setError('');
   try{
    const r=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}/enrollments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'manual'})});
-   const d=await readData(r); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
    setEnroll({...d,deviceId});
   }catch(e){setError(e instanceof Error?e.message:String(e));}
  }
@@ -196,7 +196,7 @@ function App(){
  async function connectById(pairingId:string,password:string,capability:'view'|'control'='view'){close(); setError('');
   try{
    const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId,password})});
-   const d=await readData(r); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
    if(d.status==='ready'){await view(String(d.deviceId),String(d.connectGrant),capability); return;}
    // awaiting on-device accept — poll until ready / rejected / timeout.
    setError('Đang chờ thiết bị chấp nhận…');
@@ -269,7 +269,7 @@ function App(){
     };}
    const sock=new WebSocket(g.signalingUrl); ws.current=sock;
    sock.onopen=()=>sock.send(JSON.stringify({type:'join',sessionToken:g.sessionToken}));
-   sock.onmessage=async e=>{const m=JSON.parse(e.data); if(m.type==='joined'){const offer=await peer.createOffer({offerToReceiveVideo:true}); await peer.setLocalDescription(offer); if(sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'offer',sessionId:g.sessionId,sdp:offer.sdp}));} else if(m.type==='answer'){await peer.setRemoteDescription({type:'answer',sdp:m.sdp});} else if(m.type==='candidate'&&m.candidate){await peer.addIceCandidate(m.candidate).catch(()=>{});} else if(m.type==='error'){setError(`Signaling: ${m.code}`)}};
+   sock.onmessage=async e=>{const m=JSON.parse(e.data); if(m.type==='joined'){const offer=await peer.createOffer(); await peer.setLocalDescription(offer); if(sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'offer',sessionId:g.sessionId,sdp:offer.sdp}));} else if(m.type==='answer'){await peer.setRemoteDescription({type:'answer',sdp:m.sdp});} else if(m.type==='candidate'&&m.candidate){await peer.addIceCandidate(m.candidate).catch(()=>{});} else if(m.type==='error'){setError(`Signaling: ${m.code}`)}};
    peer.onicecandidate=e=>{if(e.candidate&&sock.readyState===WebSocket.OPEN)sock.send(JSON.stringify({type:'candidate',sessionId:g.sessionId,candidate:e.candidate.toJSON()}));};
  }catch(e){setError(e instanceof Error?e.message:String(e));}}
  function close(){const currentGrant=grant;if(dc.current){try{dc.current.close()}catch{}dc.current=null} if(ws.current){try{ws.current.close()}catch{}ws.current=null} if(pc.current){pc.current.close();pc.current=null} setControlSession(false); setUsingCanvas(false); decoding.current=false; if(currentGrant){void authedFetch(`/api/vremote/v1/sessions/${currentGrant.sessionId}`,{method:'DELETE'}).catch(()=>{});setGrant(null)}}

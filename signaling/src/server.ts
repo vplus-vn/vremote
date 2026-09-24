@@ -41,7 +41,8 @@ let mongoTokens:{get(id:string):Promise<string|null>}|null=null;
   const hit=cache.get(id); if(hit&&Date.now()-hit.at<TTL)return hit.token;
   if(!ready)return null;
   try{const doc=await client.db(mongoDb).collection('devices').findOne({_id:id as any},{projection:{deviceToken:1}});
-   const token=doc&&typeof (doc as any).deviceToken==='string'?(doc as any).deviceToken:null; cache.set(id,{token,at:Date.now()}); return token;}
+   const token=doc&&typeof (doc as any).deviceToken==='string'?(doc as any).deviceToken:null; cache.set(id,{token,at:Date.now()}); return token;
+  }
   catch{return null}
  }};
 })();
@@ -60,7 +61,12 @@ server.on('upgrade',(req,socket,head)=>{if(req.url!=='/signaling'&&req.url!=='/a
 wss.on('connection',(socket,req)=>{const path=new URL(req.url??'/',`http://${req.headers.host??'localhost'}`).pathname;const role=path==='/agent'?'agent':'viewer';const c:Client={socket,role,clientId:randomUUID()};
  socket.on('message',raw=>{let m:any;try{m=JSON.parse(raw.toString())}catch{socket.close(1007,'invalid_json');return}
   if(role==='agent'){
-   if(!c.deviceId){if(m.type!=='agent.auth'||typeof m.deviceId!=='string'||typeof m.deviceToken!=='string'){socket.close(1008,'unauthorized');return}
+   if(!c.deviceId){
+    // The Android agent sends auth and hello back-to-back. Token verification is async,
+    // so hello can legitimately arrive before c.deviceId is assigned. Do not close the
+    // socket in that transient state; auth completion will register the agent.
+    if(m.type==='agent.hello')return;
+    if(m.type!=='agent.auth'||typeof m.deviceId!=='string'||typeof m.deviceToken!=='string'){socket.close(1008,'unauthorized');return}
     void verifyAgent(m.deviceId,m.deviceToken).then(ok=>{if(!ok){console.log(`agent ${m.deviceId} auth UNAUTHORIZED (token rejected; mongo=${mongoTokens?'on':'off'})`);socket.close(1008,'unauthorized');return}if(agents.has(m.deviceId))agents.get(m.deviceId)?.socket.close(4001,'replaced');c.deviceId=m.deviceId;agents.set(m.deviceId,c);console.log(`agent ${m.deviceId} CONNECTED (agents online=${agents.size})`);send(c,{type:'agent.authenticated'})}).catch(e=>{console.log(`agent ${m.deviceId} auth ERROR ${e?.message??e}`);socket.close(1011,'server_error')});return}
    if(m.type==='agent.hello'){send(c,{type:'agent.hello.ack',deviceId:c.deviceId});return}
    if(m.type==='agent.signaling'&&typeof m.sessionId==='string'&&m.sessionId.length<=128){const s=sessions.get(m.sessionId);if(!s)return;for(const peer of s)if(peer.role==='viewer')send(peer,m.payload);return}
