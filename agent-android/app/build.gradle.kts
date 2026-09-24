@@ -61,7 +61,7 @@ val hardenIssue148 by tasks.registering {
         val c = m.optJSONObject("candidate") ?: return
         val mid = c.optString("sdpMid", "")
         if (videoMode == "mjpeg" && mid.isNotBlank() && rejectedRemoteVideoMids.contains(mid)) {
-            crumb("ice:drop-rejected-video mid=$mid")
+            crumb("ice:drop-rejected-video mid=${'$'}mid")
             return
         }
         val candidate = IceCandidate(mid, c.optInt("sdpMLineIndex"), c.optString("candidate"))
