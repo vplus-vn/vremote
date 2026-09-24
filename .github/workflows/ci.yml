@@ -1,0 +1,87 @@
+name: VRemote CI
+
+# CI runs on the organization's self-hosted runner, following the vborder-web model.
+# The server runner is expected to provide PHP 8.3 + MongoDB extension + Composer.
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  contract:
+    runs-on: [self-hosted, node]
+    steps:
+      - uses: actions/checkout@v4
+      - run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
+
+  backend:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify self-hosted PHP runtime
+        run: |
+          set -euo pipefail
+          php -v
+          php -r 'exit(PHP_VERSION_ID >= 80300 && PHP_VERSION_ID < 80400 ? 0 : 1);'
+          php -m | grep -qi '^mongodb$'
+          composer --version
+      - name: Configure GitHub authentication for private Composer repositories
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
+        run: composer config --global github-oauth.github.com "$COMPOSER_TOKEN"
+      - run: composer install --no-interaction --prefer-dist
+      - run: php artisan test
+
+  console:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: console } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: console/package.json
+      - run: npm install
+      - run: npm run build
+
+  signaling:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: signaling } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: signaling/package.json
+      - run: npm install
+      - run: npm run build
+      - run: npm test
+
+  android:
+    runs-on: [self-hosted, node]
+    defaults: { run: { working-directory: agent-android } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - name: Upload Android agent APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vremote-agent-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
