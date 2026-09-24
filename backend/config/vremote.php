@@ -1,6 +1,10 @@
 <?php
 return [
     'signing' => ['skew_seconds' => 300],
+    // [v0.1.1] Chuẩn hoá API v1 — shape mặc định khi client không gửi header X-Api-Envelope (2026-09-23)
+    // `legacy` = body trần như contract v0.0.1 (agent Android đang cài); `v1` = envelope {data}/{error}.
+    // Lật sang `v1` chỉ sau khi Contract Change Gate duyệt + fleet agent đã lên bản đọc được envelope.
+    'api_envelope_default' => env('VREMOTE_API_ENVELOPE_DEFAULT', 'legacy'),
     'session_ttl' => (int) env('VREMOTE_SESSION_TTL', 1800),
     // Single VPlus Platform integration point (DSG-VREMOTE-002 §4). No VREMOTE_PLATFORM_MODE.
     'platform_url' => env('VREMOTE_PLATFORM_URL', ''),

@@ -32,7 +32,8 @@ final class SessionController {
   // Authorization: any actor holding a remote-view/control permission may close a session.
   // Full owner/tenant-scoped authorization (IDOR hardening) lands in v0.2.0 — DSG-VREMOTE-002 §5/§6.
   if(!$this->can($request,'edge.admin.view')&&!$this->can($request,'edge.admin.control'))return response()->json(['error'=>['code'=>'FORBIDDEN','message'=>'edge.admin.view required']],403);
-  $s=$store->get($sessionId);if(!$s)return response()->json(null,404);
+  // [v0.1.1] Chuẩn hoá API v1 — 404 trả envelope lỗi chuẩn thay cho body null (2026-09-23)
+  $s=$store->get($sessionId);if(!$s)return response()->json(['error'=>['code'=>'NOT_FOUND','message'=>'Session not found']],404);
   $store->forget($sessionId);
   // Push an explicit stop to the agent so screen capture ends on close, not only at TTL expiry
   // (baseline gap H1). Best-effort: an offline agent still lets the session close.

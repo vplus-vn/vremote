@@ -46,7 +46,7 @@ object ApiClient {
         http.newCall(req).execute().use { r ->
             val txt = r.body?.string() ?: ""
             if (!r.isSuccessful) throw RuntimeException(parseErr(txt, r.code))
-            val j = JSONObject(txt)
+            val j = unwrap(JSONObject(txt))
             return Announce(j.getString("deviceId"), j.getString("pairingId"), j.getString("deviceToken"))
         }
     }
@@ -58,7 +58,7 @@ object ApiClient {
             .header("X-Device-Token", deviceToken).get().build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) return null
-            val p = JSONObject(r.body?.string() ?: "{}").optJSONObject("pending") ?: return null
+            val p = unwrap(JSONObject(r.body?.string() ?: "{}")).optJSONObject("pending") ?: return null
             return Pending(p.optString("requestId"), p.optString("actor", "operator"))
         }
     }
@@ -83,6 +83,10 @@ object ApiClient {
                 j.optString("url", "/downloads/vremote-agent.apk"), j.optString("notes", ""))
         }
     }
+
+    // [v0.1.1] Chuẩn hoá API v1 — đọc được cả envelope chuẩn {data:{...}} lẫn body cũ, để backend có thể
+    // lật mặc định X-Api-Envelope sang v1 mà không vỡ agent (2026-09-23)
+    private fun unwrap(j: JSONObject): JSONObject = if (!j.has("error")) j.optJSONObject("data") ?: j else j
 
     private fun parseErr(txt: String, code: Int): String = try {
         JSONObject(txt).optJSONObject("error")?.optString("message") ?: "HTTP $code"

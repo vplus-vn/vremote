@@ -25,6 +25,8 @@ final class AuthorizationServiceTest extends TestCase
             public function __construct(private array $devices) {}
             public function get(string $deviceId): ?array { return $this->devices[$deviceId] ?? null; }
             public function findByMachineCode(string $machineCode): ?array { return null; }
+            public function findByPairingId(string $pairingId): ?array { return null; }
+            public function delete(string $deviceId): void {}
             public function list(array $filters = [], int $limit = 50): array { return array_values($this->devices); }
             public function save(array $device): void {}
             public function update(string $deviceId, array $fields): void {}

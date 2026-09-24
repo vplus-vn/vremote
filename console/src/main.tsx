@@ -15,6 +15,10 @@ function iceSafe(servers:RTCIceServer[]):RTCIceServer[]{return (servers||[]).fil
 const agentDownloadUrl=import.meta.env.VITE_AGENT_DOWNLOAD_URL??'/downloads/vremote-agent.apk';
 const TOKEN_KEY='vremote_token';
 
+// API v1 envelope opt-in
+const ENVELOPE_HEADER='X-Api-Envelope';
+async function readData(r:Response):Promise<any>{const j:any=await r.json().catch(()=>({}));return j&&typeof j==='object'&&!('error' in j)&&'data' in j?j.data:j;}
+
 // Auth is packaged into VRemote (like the S&B admin portal): the console logs in through
 // VRemote's own origin (POST /api/vremote/v1/auth/login proxies to the Platform), stores the
 // issued token, and sends it as Bearer on every API call. The backend resolves identity via
@@ -39,7 +43,7 @@ function Login({onToken}:{onToken:(t:string)=>void}){
  const [busy,setBusy]=React.useState(false); const [error,setError]=React.useState('');
  async function submit(e:React.FormEvent){e.preventDefault(); setBusy(true); setError('');
   try{
-   const r=await fetch('/api/vremote/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,email:username,password})});
+   const r=await fetch('/api/vremote/v1/auth/login',{method:'POST',headers:{'content-type':'application/json',[ENVELOPE_HEADER]:'v1'},body:JSON.stringify({username,email:username,password})});
    const body=await r.json().catch(()=>({}));
    if(!r.ok){setError(body?.error?.message??body?.message??`Đăng nhập thất bại (HTTP ${r.status})`); return;}
    const token=extractToken(body);
@@ -139,14 +143,14 @@ function App(){
  const sendInput=React.useCallback((o:Record<string,unknown>)=>{const d=dc.current; if(d&&d.readyState==='open'){try{d.send(JSON.stringify(o))}catch{/* ignore */}}},[]);
 
  const authedFetch=React.useCallback(async(input:string,init?:RequestInit)=>{
-  const headers=new Headers(init?.headers); if(token)headers.set('Authorization',`Bearer ${token}`);
+  const headers=new Headers(init?.headers); if(token)headers.set('Authorization',`Bearer ${token}`); if(!headers.has(ENVELOPE_HEADER))headers.set(ENVELOPE_HEADER,'v1');
   const r=await fetch(input,{...init,headers});
   if(r.status===401){writeToken(''); setToken(''); throw Error('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại.');}
   return r;
  },[token]);
 
  const refresh=React.useCallback(async()=>{
-  try{const r=await authedFetch('/api/vremote/v1/devices'); if(!r.ok)throw Error(`HTTP ${r.status}`); const x=await r.json(); setDevices(x.items??[]);}
+  try{const r=await authedFetch('/api/vremote/v1/devices'); if(!r.ok)throw Error(`HTTP ${r.status}`); const x=await readData(r); setDevices(x.items??[]);}
   catch(e){setError(e instanceof Error?e.message:String(e));}
  },[authedFetch]);
 
@@ -157,7 +161,7 @@ function App(){
   try{
    const body:Record<string,string>={machineCode}; if(name)body.name=name; if(deviceId)body.deviceId=deviceId; if(tenantId)body.tenantId=tenantId;
    const r=await authedFetch('/api/vremote/v1/devices',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   const d=await readData(r); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
    setShowReg(false); await refresh(); await genEnroll(String(d.deviceId));
   }catch(e){setError(e instanceof Error?e.message:String(e));}
  }
@@ -200,7 +204,7 @@ function App(){
    while(Date.now()<deadline){
     await new Promise(res=>setTimeout(res,1500));
     const pr=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}/connect/${encodeURIComponent(requestId)}`);
-    const pd=await pr.json().catch(()=>({}));
+    const pd=await readData(pr);
     if(pr.ok&&pd.status==='ready'){setError(''); await view(deviceId,String(pd.connectGrant),capability); return;}
     if(!pr.ok){throw Error(pd?.error?.message??'Thiết bị từ chối hoặc hết hạn.');}
    }
@@ -248,7 +252,7 @@ function App(){
  }
  async function view(deviceId:string,connectGrant?:string,capability:'view'|'control'='view'){close(); setError(''); try{
    const body:Record<string,unknown>={deviceId,capability}; if(connectGrant)body.connectGrant=connectGrant;
-   const r=await authedFetch('/api/vremote/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); if(!r.ok)throw Error(await r.text()); const g:Grant=await r.json(); setGrant(g); setControlSession(capability==='control'); setIceState('mới');
+   const r=await authedFetch('/api/vremote/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); if(!r.ok)throw Error(await r.text()); const g:Grant=await readData(r); setGrant(g); setControlSession(capability==='control'); setIceState('mới');
    // Warn early if the server handed us no TURN relay: STUN-only sessions usually show a black screen
    // across the internet (NAT can't be traversed). This is a server config issue (VREMOTE_TURN_*), not a bug.
    const hasTurn=(g.iceServers||[]).some(s=>{const u=(s as RTCIceServer).urls; const arr=Array.isArray(u)?u:[u]; return arr.some(x=>typeof x==='string'&&/^turns?:/i.test(x));}); if(!hasTurn)setError('⚠ Máy chủ chưa cấu hình TURN — xem qua Internet có thể KHÔNG hiện hình (chỉ chạy trong cùng mạng LAN). Cần bật TURN ở server (VREMOTE_TURN_URLS + VREMOTE_TURN_SHARED_SECRET).');
