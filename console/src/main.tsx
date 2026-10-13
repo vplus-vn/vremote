@@ -196,7 +196,7 @@ function App(){
  async function connectById(pairingId:string,password:string,capability:'view'|'control'='view'){close(); setError('');
   try{
    const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId,password})});
-   const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   const d=await readData(r); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
    if(d.status==='ready'){await view(String(d.deviceId),String(d.connectGrant),capability); return;}
    // awaiting on-device accept — poll until ready / rejected / timeout.
    setError('Đang chờ thiết bị chấp nhận…');

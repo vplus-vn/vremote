@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins { id("com.android.application"); kotlin("android") }
 
 android { namespace = "vremote.vplus.vn"; compileSdk = 35
-    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "0.0.27" }
+    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 28; versionName = "0.0.28" }
     buildFeatures { buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
@@ -36,7 +36,7 @@ val hardenIssue148 by tasks.registering {
         s = s.replace("        factory.dispose()\n        egl.release()", "        if (::factory.isInitialized) factory.dispose()\n        egl?.release()")
 
         val oldField = "    private var activeIceServers: List<PeerConnection.IceServer> = emptyList()\n"
-        val newField = oldField + "    private val pendingIceCandidates = ArrayList<IceCandidate>()\n    private val pendingRemoteCandidates = ArrayList<IceCandidate>()\n    @Volatile private var localDescriptionReady = false\n    @Volatile private var remoteDescriptionReady = false\n"
+        val newField = oldField + "    private val pendingIceCandidates = ArrayList<IceCandidate>()\n    private val pendingRemoteCandidates = ArrayList<IceCandidate>()\n    @Volatile private var localDescriptionReady = false\n    @Volatile private var remoteDescriptionReady = false\n    private val rejectedRemoteVideoMids = HashSet<String>()\n"
         if (oldField in s && "pendingIceCandidates" !in s) s = s.replace(oldField, newField)
 
         val oldIce = """        override fun onIceCandidate(c: IceCandidate) {
@@ -59,7 +59,12 @@ val hardenIssue148 by tasks.registering {
 """
         val newHandleCandidate = """    private fun handleCandidate(m: JSONObject) {
         val c = m.optJSONObject("candidate") ?: return
-        val candidate = IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate"))
+        val mid = c.optString("sdpMid", "")
+        if (videoMode == "mjpeg" && mid.isNotBlank() && rejectedRemoteVideoMids.contains(mid)) {
+            crumb("ice:drop-rejected-video mid=${'$'}mid")
+            return
+        }
+        val candidate = IceCandidate(mid, c.optInt("sdpMLineIndex"), c.optString("candidate"))
         synchronized(pendingRemoteCandidates) {
             val pc = peer
             if (pc == null || !remoteDescriptionReady) {
@@ -73,8 +78,24 @@ val hardenIssue148 by tasks.registering {
 """
         if (oldHandleCandidate in s && "ice:queued-remote" !in s) s = s.replace(oldHandleCandidate, newHandleCandidate)
 
+        // The browser offer can contain a video m-line even though MJPEG answers reject video.
+        // Keep those mids so trickled video candidates are ignored instead of entering the
+        // native ICE path for an m-line that is explicitly rejected in the answer.
         val oldRemote = "        crumb(\"offer:setRemote\")"
-        val newRemote = "        localDescriptionReady = false\n        remoteDescriptionReady = false\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n        crumb(\"offer:setRemote\")"
+        val newRemote = """        if (videoMode == "mjpeg") {
+            synchronized(rejectedRemoteVideoMids) {
+                rejectedRemoteVideoMids.clear()
+                var inVideo = false
+                sdp.split("\\r\\n").forEach { line ->
+                    if (line.startsWith("m=")) inVideo = line.startsWith("m=video")
+                    if (inVideo && line.startsWith("a=mid:")) rejectedRemoteVideoMids.add(line.removePrefix("a=mid:"))
+                }
+            }
+        }
+        localDescriptionReady = false
+        remoteDescriptionReady = false
+        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }
+        crumb("offer:setRemote")"""
         if (oldRemote in s && "remoteDescriptionReady = false" !in s) s = s.replace(oldRemote, newRemote)
 
         val oldRemoteSuccess = "override fun onSetSuccess() {\n                crumb(\"offer:remote ok\")\n                pc.createAnswer"
@@ -91,27 +112,30 @@ val hardenIssue148 by tasks.registering {
                 pc.createAnswer"""
         if (oldRemoteSuccess in s) s = s.replace(oldRemoteSuccess, newRemoteSuccess)
 
+        // Do not emit trickled local candidates before the answer. This keeps the remote side from
+        // processing candidates against an answer it has not installed yet.
         val oldSuccess = "override fun onSetSuccess() { crumb(\"offer:local ok ${'$'}{cfg()}\") }"
         val newSuccess = """override fun onSetSuccess() {
                                     localDescriptionReady = true
-                                    synchronized(pendingIceCandidates) {
-                                        val queued = pendingIceCandidates.toList()
+                                    val queued = synchronized(pendingIceCandidates) {
+                                        val copy = pendingIceCandidates.toList()
                                         pendingIceCandidates.clear()
-                                        queued.forEach { candidate ->
-                                            sendSignal(
-                                                JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
-                                                    "payload", JSONObject().put("type", "candidate").put("sessionId", activeSession).put(
-                                                        "candidate", JSONObject().put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex).put("candidate", candidate.sdp)
-                                                    )
-                                                )
-                                            )
-                                        }
+                                        copy
                                     }
                                     sendSignal(
                                         JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
                                             "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
                                         )
                                     )
+                                    queued.forEach { candidate ->
+                                        sendSignal(
+                                            JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                                "payload", JSONObject().put("type", "candidate").put("sessionId", activeSession).put(
+                                                    "candidate", JSONObject().put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex).put("candidate", candidate.sdp)
+                                                )
+                                            )
+                                        )
+                                    }
                                     crumb("offer:local ok ${'$'}{cfg()}")
                                 }"""
         if (oldSuccess in s) s = s.replace(oldSuccess, newSuccess)
@@ -154,6 +178,8 @@ val hardenIssue148 by tasks.registering {
         val newEnd = "        activeSession = null\n        activeCapability = null\n        remoteDescriptionReady = false\n        localDescriptionReady = false\n        synchronized(pendingRemoteCandidates) { pendingRemoteCandidates.clear() }\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n"
         if (oldEnd in s && "pendingRemoteCandidates.clear()" !in s) s = s.replace(oldEnd, newEnd)
 
+        // Extra Issue #148 guard: reject trickled candidates belonging to video m-lines that the
+        // MJPEG answer explicitly rejects, and keep answer-before-candidate ordering deterministic.
         p.writeText(s)
     }
 }
