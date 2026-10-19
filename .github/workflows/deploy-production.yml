@@ -1,10 +1,17 @@
 name: Deploy Production
 
-# Production deploy from main - CHI CHAY TAY (Actions -> Deploy Production -> Run workflow, chon main).
+# Production deploy from main: TU DONG khi push main (chi code ung dung), van chay tay duoc (Run workflow, chon main).
 # Build and deploy are in the same workflow so the published APK always matches the commit.
-# [v0.1.1] Bo tu dong deploy khi push main (repo PUBLIC: moi push main tung len prod ngay, khong co buoc duyet);
-# chay tren runner GitHub-hosted vi runner tu host cua org khong nhan job repo public (2026-10-19).
+# [v0.1.1] Chay tren runner GitHub-hosted vi runner tu host cua org khong nhan job repo public (2026-10-19).
+# [v0.1.1] Tu dong deploy khi merge vao main (chu du an duyet 2026-10-19); main chi nhan code qua PR "Duyet prod".
+# Bo qua push chi sua workflow/tai lieu: sua file nay khong tu tung len prod.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
