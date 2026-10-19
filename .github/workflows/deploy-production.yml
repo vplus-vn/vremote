@@ -1,11 +1,10 @@
 name: Deploy Production
 
-# Automatic production deploy from main on the self-hosted [self-hosted, node] runner.
+# Production deploy from main - CHI CHAY TAY (Actions -> Deploy Production -> Run workflow, chon main).
 # Build and deploy are in the same workflow so the published APK always matches the commit.
-# Manual dispatch remains available for re-deploys.
+# [v0.1.1] Bo tu dong deploy khi push main (repo PUBLIC: moi push main tung len prod ngay, khong co buoc duyet);
+# chay tren runner GitHub-hosted vi runner tu host cua org khong nhan job repo public (2026-10-19).
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -20,7 +19,9 @@ env:
 
 jobs:
   build-agent:
-    runs-on: [self-hosted, node]
+    # [v0.1.1] Repo PUBLIC -> runner GitHub-hosted (mien phi cho repo public). Runner tu host cua org khong nhan
+    # job repo public (job cho 24h roi bi huy tu 13/10) va KHONG duoc chay code PR cua repo public (2026-10-19).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -76,13 +77,21 @@ jobs:
 
   deploy:
     needs: build-agent
-    runs-on: [self-hosted, node]
+    # [v0.1.1] Repo PUBLIC -> runner GitHub-hosted (mien phi cho repo public). Runner tu host cua org khong nhan
+    # job repo public (job cho 24h roi bi huy tu 13/10) va KHONG duoc chay code PR cua repo public (2026-10-19).
+    runs-on: ubuntu-latest
     environment: production
     steps:
       - name: Fail fast if not on main
         run: test "${{ github.ref }}" = "refs/heads/main"
       - uses: actions/checkout@v4
-      - name: Verify self-hosted PHP runtime
+      - name: Setup PHP 8.3 + mongodb + composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mongodb
+          tools: composer:v2
+      - name: Verify PHP runtime
         working-directory: backend
         run: |
           set -euo pipefail
