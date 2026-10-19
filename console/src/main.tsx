@@ -209,7 +209,7 @@ function App(){
   try{
    // Pairing ID is a human-facing numeric ID; deviceId is the internal DEV-... identifier
    // returned by the API. Keep these separate and never use the input ID in a device route.
-   const normalizedPairingId=String(pairingId??'').replace(/\\D+/g,'');
+   const normalizedPairingId=String(pairingId??'').replace(/\D+/g,'');
    if(!normalizedPairingId)throw Error('ID thiết bị không hợp lệ: cần nhập ID ghép nối dạng số.');
    if(!password)throw Error('Vui lòng nhập mật khẩu thiết bị.');
    const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId:normalizedPairingId,password})});
