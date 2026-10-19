@@ -17,7 +17,19 @@ const TOKEN_KEY='vremote_token';
 
 // API v1 envelope opt-in
 const ENVELOPE_HEADER='X-Api-Envelope';
-async function readData(r:Response):Promise<any>{const j:any=await r.json().catch(()=>({}));return j&&typeof j==='object'&&!('error' in j)&&'data' in j?j.data:j;}
+async function readData(r:Response):Promise<any>{
+ const json:any=await r.json().catch(()=>({}));
+ // API standardization can leave an envelope around an already enveloped payload.
+ // Unwrap only recognizable success envelopes; never unwrap error responses.
+ let value=json;
+ for(let depth=0;depth<3;depth++){
+  if(!value||typeof value!=='object'||Array.isArray(value)||'error' in value||!('data' in value))break;
+  const keys=Object.keys(value);
+  if(keys.some(k=>!['data','meta','message','status','correlationId','correlation_id'].includes(k)))break;
+  value=value.data;
+ }
+ return value;
+}
 
 // Auth is packaged into VRemote (like the S&B admin portal): the console logs in through
 // VRemote's own origin (POST /api/vremote/v1/auth/login proxies to the Platform), stores the
@@ -195,23 +207,34 @@ function App(){
  // device to accept when it requires accept, then opens the view with the connect grant.
  async function connectById(pairingId:string,password:string,capability:'view'|'control'='view'){close(); setError('');
   try{
-   const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId,password})});
-   const d=await readData(r); if(!r.ok)throw Error(d?.error?.message??`HTTP ${r.status}`);
+   // Pairing ID is a human-facing numeric ID; deviceId is the internal DEV-... identifier
+   // returned by the API. Keep these separate and never use the input ID in a device route.
+   const normalizedPairingId=String(pairingId??'').replace(/\D+/g,'');
+   if(!normalizedPairingId)throw Error('ID thiết bị không hợp lệ: cần nhập ID ghép nối dạng số.');
+   if(!password)throw Error('Vui lòng nhập mật khẩu thiết bị.');
+   const r=await authedFetch('/api/vremote/v1/devices/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pairingId:normalizedPairingId,password})});
+   const d=await readData(r);
+   if(!r.ok)throw Error(d?.error?.message??d?.message??`HTTP ${r.status}`);
+   if(!d||typeof d!=='object')throw Error('API connect trả về dữ liệu không hợp lệ.');
+   const deviceId=typeof d.deviceId==='string'?d.deviceId.trim():'';
    if(d.status==='ready'){
-    if(!d.deviceId||!d.connectGrant)throw Error('API connect trả về thiếu deviceId hoặc connectGrant.');
-    await view(String(d.deviceId),String(d.connectGrant),capability); return;
+    if(!deviceId||typeof d.connectGrant!=='string'||!d.connectGrant)throw Error('API connect trả về thiếu deviceId hoặc connectGrant.');
+    await view(deviceId,d.connectGrant,capability); return;
    }
-   // awaiting on-device accept — poll until ready / rejected / timeout.
-   // Validate the envelope payload before building the status-poll URL.
-   if(!d.deviceId||!d.requestId)throw Error('API connect trả về thiếu deviceId hoặc requestId.');
+   // awaiting on-device accept — poll using the internal deviceId, never the pairing ID.
+   if(!deviceId||typeof d.requestId!=='string'||!d.requestId)throw Error('API connect trả về thiếu deviceId hoặc requestId.');
+   const requestId=d.requestId.trim();
    setError('Đang chờ thiết bị chấp nhận…');
-   const deviceId=String(d.deviceId), requestId=String(d.requestId); const deadline=Date.now()+130000;
+   const deadline=Date.now()+130000;
    while(Date.now()<deadline){
     await new Promise(res=>setTimeout(res,1500));
     const pr=await authedFetch(`/api/vremote/v1/devices/${encodeURIComponent(deviceId)}/connect/${encodeURIComponent(requestId)}`);
     const pd=await readData(pr);
-    if(pr.ok&&pd.status==='ready'){setError(''); await view(deviceId,String(pd.connectGrant),capability); return;}
-    if(!pr.ok){throw Error(pd?.error?.message??'Thiết bị từ chối hoặc hết hạn.');}
+    if(pr.ok&&pd?.status==='ready'){
+     if(typeof pd.connectGrant!=='string'||!pd.connectGrant)throw Error('API connect status trả về thiếu connectGrant.');
+     setError(''); await view(deviceId,pd.connectGrant,capability); return;
+    }
+    if(!pr.ok)throw Error(pd?.error?.message??pd?.message??'Thiết bị từ chối hoặc hết hạn.');
    }
    throw Error('Hết thời gian chờ thiết bị chấp nhận.');
   }catch(e){setError(e instanceof Error?e.message:String(e));}
