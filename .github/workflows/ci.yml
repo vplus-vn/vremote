@@ -10,17 +10,23 @@ on:
 
 jobs:
   contract:
-    runs-on: [self-hosted, node]
+    runs-on: ubuntu-latest   # [v0.1.1] repo public -> GitHub-hosted (workflow dang tat tay)
     steps:
       - uses: actions/checkout@v4
       - run: test -s api/vremote/openapi.yaml && test -s api/vremote/asyncapi.yaml && test -s api/vremote/signing.md
 
   backend:
-    runs-on: [self-hosted, node]
+    runs-on: ubuntu-latest   # [v0.1.1] repo public -> GitHub-hosted (workflow dang tat tay)
     defaults: { run: { working-directory: backend } }
     steps:
       - uses: actions/checkout@v4
-      - name: Verify self-hosted PHP runtime
+      - name: Setup PHP 8.3 + mongodb + composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mongodb
+          tools: composer:v2
+      - name: Verify PHP runtime
         run: |
           set -euo pipefail
           php -v
@@ -35,7 +41,7 @@ jobs:
       - run: php artisan test
 
   console:
-    runs-on: [self-hosted, node]
+    runs-on: ubuntu-latest   # [v0.1.1] repo public -> GitHub-hosted (workflow dang tat tay)
     defaults: { run: { working-directory: console } }
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +54,7 @@ jobs:
       - run: npm run build
 
   signaling:
-    runs-on: [self-hosted, node]
+    runs-on: ubuntu-latest   # [v0.1.1] repo public -> GitHub-hosted (workflow dang tat tay)
     defaults: { run: { working-directory: signaling } }
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +68,7 @@ jobs:
       - run: npm test
 
   android:
-    runs-on: [self-hosted, node]
+    runs-on: ubuntu-latest   # [v0.1.1] repo public -> GitHub-hosted (workflow dang tat tay)
     defaults: { run: { working-directory: agent-android } }
     steps:
       - uses: actions/checkout@v4
