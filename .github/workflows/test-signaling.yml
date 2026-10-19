@@ -12,7 +12,9 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, node]
+    # [v0.1.1] Repo PUBLIC -> runner GitHub-hosted (mien phi cho repo public). Runner tu host cua org khong nhan
+    # job repo public (job cho 24h roi bi huy tu 13/10) va KHONG duoc chay code PR cua repo public (2026-10-19).
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: signaling
