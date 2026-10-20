@@ -670,7 +670,7 @@ class RemoteAgentService : Service() {
                             override fun onSetSuccess() {
                                 crumb("offer:local ok ${cfg()}")
                                 crumb("offer:before sendSignal")
-                                val sent = sendSignal(
+                                sendSignal(
                                     JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
                                         "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
                                     )
