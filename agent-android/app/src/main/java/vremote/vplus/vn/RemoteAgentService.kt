@@ -262,8 +262,21 @@ class RemoteAgentService : Service() {
         )
     }
 
+    /**
+     * Persist a bounded breadcrumb history so it survives a native process crash.
+     * Never include SDP, device tokens, passwords, or other credentials here.
+     */
     private fun crumb(s: String) {
-        try { getSharedPreferences("vremote", MODE_PRIVATE).edit().putString("crumb", s + " @" + (System.currentTimeMillis() / 1000 % 100000)).commit() } catch (_: Throwable) { }
+        try {
+            val p = getSharedPreferences("vremote", MODE_PRIVATE)
+            val line = (System.currentTimeMillis() / 1000).toString() + " " + s.take(240)
+            val old = p.getString("crumbLog", "") ?: ""
+            val lines = (old.lineSequence().filter { it.isNotBlank() } + sequenceOf(line)).toList().takeLast(40)
+            p.edit()
+                .putString("crumb", s + " @" + (System.currentTimeMillis() / 1000 % 100000))
+                .putString("crumbLog", lines.joinToString("\n").takeLast(5000))
+                .commit()
+        } catch (_: Throwable) { }
     }
     private fun boot(s: String) {
         try { getSharedPreferences("vremote", MODE_PRIVATE).edit().putString("boot", s + " @" + (System.currentTimeMillis() / 1000 % 100000)).commit() } catch (_: Throwable) { }
@@ -656,11 +669,13 @@ class RemoteAgentService : Service() {
                         pc.setLocalDescription(object : SimpleSdpObserver() {
                             override fun onSetSuccess() {
                                 crumb("offer:local ok ${cfg()}")
-                                sendSignal(
+                                crumb("offer:before sendSignal")
+                                val sent = sendSignal(
                                     JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
                                         "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
                                     )
                                 )
+                                crumb("offer:after sendSignal")
                             }
                             override fun onSetFailure(e: String) { crumb("offer:local FAIL ${cfg()} $e") }
                         }, fixed)
