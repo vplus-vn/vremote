@@ -625,22 +625,25 @@ class RemoteAgentService : Service() {
 
     private fun onInput(text: String) {
         if (activeSession == null || activeCapability != "control") return
-        val svc = VRemoteInputService.instance ?: return
+        val svc = VRemoteInputService.instance ?: run { crumb("input:no accessibility service"); return }
         if (screenW <= 0 || screenH <= 0) cacheScreenSize()
-        if (screenW <= 0 || screenH <= 0) return
-        val m = try { JSONObject(text) } catch (_: Throwable) { return }
+        if (screenW <= 0 || screenH <= 0) { crumb("input:no screen size"); return }
+        val m = try { JSONObject(text) } catch (_: Throwable) { crumb("input:invalid json"); return }
         val w = screenW
         val h = screenH
         fun px(v: Double, max: Int) = (v.coerceIn(0.0, 1.0) * max).toInt()
-        when (m.optString("t")) {
-            "tap" -> { val x = px(m.optDouble("x", 0.0), w); val y = px(m.optDouble("y", 0.0), h); handler.post { svc.tap(x, y) } }
-            "long" -> { val x = px(m.optDouble("x", 0.0), w); val y = px(m.optDouble("y", 0.0), h); handler.post { svc.longPress(x, y) } }
-            "swipe" -> { val x1 = px(m.optDouble("x1", 0.0), w); val y1 = px(m.optDouble("y1", 0.0), h); val x2 = px(m.optDouble("x2", 0.0), w); val y2 = px(m.optDouble("y2", 0.0), h); val ms = m.optLong("ms", 200).coerceIn(1, 60000); handler.post { svc.swipe(x1, y1, x2, y2, ms) } }
-            "key" -> { val k = m.optString("k"); if (k == "del") handler.post { svc.delChar() } else handler.post { svc.global(k) } }
-            "text" -> { val s = m.optString("s"); handler.post { svc.typeText(s) } }
+        val kind = m.optString("t")
+        // Log only the input kind, never typed text, coordinates, or other user content.
+        crumb("input:received type=$kind")
+        when (kind) {
+            "tap" -> { val x = px(m.optDouble("x", 0.0), w); val y = px(m.optDouble("y", 0.0), h); handler.post { crumb("input:dispatch tap"); svc.tap(x, y); crumb("input:done tap") } }
+            "long" -> { val x = px(m.optDouble("x", 0.0), w); val y = px(m.optDouble("y", 0.0), h); handler.post { crumb("input:dispatch long"); svc.longPress(x, y); crumb("input:done long") } }
+            "swipe" -> { val x1 = px(m.optDouble("x1", 0.0), w); val y1 = px(m.optDouble("y1", 0.0), h); val x2 = px(m.optDouble("x2", 0.0), w); val y2 = px(m.optDouble("y2", 0.0), h); val ms = m.optLong("ms", 200).coerceIn(1, 60000); handler.post { crumb("input:dispatch swipe"); svc.swipe(x1, y1, x2, y2, ms); crumb("input:done swipe") } }
+            "key" -> { val k = m.optString("k"); handler.post { crumb("input:dispatch key=$k"); if (k == "del") svc.delChar() else svc.global(k); crumb("input:done key=$k") } }
+            "text" -> { val value = m.optString("s"); handler.post { crumb("input:dispatch text len=${value.length}"); svc.typeText(value); crumb("input:done text") } }
+            else -> crumb("input:unknown type=$kind")
         }
     }
-
     private fun handleCandidate(m: JSONObject) {
         val c = m.optJSONObject("candidate") ?: return
         peer?.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate")))
