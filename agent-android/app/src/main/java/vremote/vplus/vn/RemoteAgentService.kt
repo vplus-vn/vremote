@@ -648,32 +648,22 @@ class RemoteAgentService : Service() {
                 crumb("offer:remote ok")
                 pc.createAnswer(object : SimpleSdpObserver() {
                     override fun onCreateSuccess(d: SessionDescription) {
-                        if (videoMode == "mjpeg") {
-                            val noVideo = removeVideoMLine(d.description)
-                            crumb("offer:answer [mjpeg,no-video]")
-                            val fixed = SessionDescription(d.type, noVideo)
-                            pc.setLocalDescription(object : SimpleSdpObserver() {
-                                override fun onSetSuccess() { crumb("offer:local ok ${cfg()}") }
-                                override fun onSetFailure(e: String) { crumb("offer:local FAIL ${cfg()} $e") }
-                            }, fixed)
-                            sendSignal(
-                                JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
-                                    "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
+                        val fixedSdp = if (videoMode == "mjpeg") rejectVideoMLine(d.description) else preferVp8(d.description)
+                        val fixed = SessionDescription(d.type, fixedSdp)
+                        crumb(if (videoMode == "mjpeg") "offer:answer [mjpeg,reject-video]" else "offer:answer [vp8]")
+                        // Do not signal the answer until native WebRTC accepts the exact local SDP.
+                        // Sending it before setLocalDescription completes can race ICE/SDP state.
+                        pc.setLocalDescription(object : SimpleSdpObserver() {
+                            override fun onSetSuccess() {
+                                crumb("offer:local ok ${cfg()}")
+                                sendSignal(
+                                    JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                        "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
+                                    )
                                 )
-                            )
-                        } else {
-                            val fixed = SessionDescription(d.type, preferVp8(d.description))
-                            crumb("offer:answer [vp8]")
-                            pc.setLocalDescription(object : SimpleSdpObserver() {
-                                override fun onSetSuccess() { crumb("offer:local ok ${cfg()}") }
-                                override fun onSetFailure(e: String) { crumb("offer:local FAIL ${cfg()} $e") }
-                            }, fixed)
-                            sendSignal(
-                                JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
-                                    "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
-                                )
-                            )
-                        }
+                            }
+                            override fun onSetFailure(e: String) { crumb("offer:local FAIL ${cfg()} $e") }
+                        }, fixed)
                     }
                     override fun onCreateFailure(e: String) { crumb("offer:answer FAIL $e") }
                 }, MediaConstraints())
@@ -682,17 +672,31 @@ class RemoteAgentService : Service() {
         }, SessionDescription(SessionDescription.Type.OFFER, sdp))
     }
 
-    private fun removeVideoMLine(sdp: String): String {
+    /**
+     * Reject video without deleting its SDP media section. SDP answers must preserve the
+     * media-section count/order from the offer; deleting m=video can trip native libwebrtc
+     * assertions on some Android builds (ApplicationExitInfo: native crash / SIGABRT).
+     */
+    private fun rejectVideoMLine(sdp: String): String {
         return try {
-            val lines = sdp.split("\r\n")
-            val out = ArrayList<String>(lines.size)
+            val lines = sdp.split("\r\n").toMutableList()
             var inVideo = false
-            for (line in lines) {
-                if (line.startsWith("m=")) inVideo = line.startsWith("m=video")
-                if (inVideo) continue
-                out.add(line)
+            for (i in lines.indices) {
+                val line = lines[i]
+                if (line.startsWith("m=")) inVideo = line.startsWith("m=video ")
+                if (inVideo && line.startsWith("m=video ")) {
+                    val parts = line.split(" ").toMutableList()
+                    if (parts.size >= 3) {
+                        parts[1] = "0"
+                        lines[i] = parts.joinToString(" ")
+                    }
+                } else if (inVideo && line.startsWith("a=sendrecv")) {
+                    lines[i] = "a=inactive"
+                } else if (inVideo && (line.startsWith("a=sendonly") || line.startsWith("a=recvonly"))) {
+                    lines[i] = "a=inactive"
+                }
             }
-            out.joinToString("\r\n")
+            lines.joinToString("\r\n")
         } catch (_: Throwable) { sdp }
     }
 
