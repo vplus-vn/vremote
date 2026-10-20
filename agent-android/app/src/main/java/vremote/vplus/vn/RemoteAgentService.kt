@@ -564,6 +564,7 @@ class RemoteAgentService : Service() {
 
     private fun observer() = object : PeerConnection.Observer {
         override fun onIceCandidate(c: IceCandidate) {
+            crumb("ice:candidate mid=${c.sdpMid} mline=${c.sdpMLineIndex}")
             sendSignal(
                 JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
                     "payload", JSONObject().put("type", "candidate").put("sessionId", activeSession).put(
@@ -572,27 +573,31 @@ class RemoteAgentService : Service() {
                 )
             )
         }
-        override fun onSignalingChange(s: PeerConnection.SignalingState) {}
+        override fun onSignalingChange(s: PeerConnection.SignalingState) { crumb("rtc:signaling=$s") }
         override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) { crumb("ice:$s") }
-        override fun onIceConnectionReceivingChange(b: Boolean) {}
-        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {}
-        override fun onIceCandidatesRemoved(c: Array<IceCandidate>) {}
-        override fun onAddStream(s: MediaStream) {}
-        override fun onRemoveStream(s: MediaStream) {}
+        override fun onIceConnectionReceivingChange(b: Boolean) { crumb("ice:receiving=$b") }
+        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) { crumb("ice:gathering=$s") }
+        override fun onIceCandidatesRemoved(c: Array<IceCandidate>) { crumb("ice:removed count=${c.size}") }
+        override fun onAddStream(s: MediaStream) { crumb("rtc:addStream") }
+        override fun onRemoveStream(s: MediaStream) { crumb("rtc:removeStream") }
         override fun onDataChannel(d: DataChannel) {
+            crumb("dc:created state=${d.state()}")
             inputChannel = d
             d.registerObserver(object : DataChannel.Observer {
-                override fun onBufferedAmountChange(p: Long) {}
+                override fun onBufferedAmountChange(p: Long) { crumb("dc:buffered=$p") }
                 override fun onStateChange() {
-                    if (d.state() == DataChannel.State.OPEN) sendControlStatus(d)
+                    val state = d.state()
+                    crumb("dc:state=$state")
+                    if (state == DataChannel.State.OPEN) sendControlStatus(d)
                 }
                 override fun onMessage(buf: DataChannel.Buffer) {
                     try {
+                        crumb("dc:message binary=${buf.binary} bytes=${buf.data.remaining()}")
                         val b = buf.data
                         val bytes = ByteArray(b.remaining())
                         b.get(bytes)
                         if (!buf.binary) onInput(String(bytes, StandardCharsets.UTF_8))
-                    } catch (_: Throwable) { }
+                    } catch (t: Throwable) { crumb("dc:message error ${t.javaClass.simpleName}") }
                 }
             })
         }
