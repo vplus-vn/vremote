@@ -208,7 +208,10 @@ class MainActivity : Activity() {
                 // Upload diagnostics so support can read the box's codec caps + last crash point in the
                 // console without the tester pasting anything (helps pin the first-frame encode crash).
                 val exit = p.getString("exitInfo", "") ?: ""
-                val di = (if (exit.isNotEmpty()) "== LAST NATIVE CRASH (ApplicationExitInfo) ==\n$exit\n\n" else "") + (try { DeviceInfo.report() } catch (_: Throwable) { "" })
+                val crumbs = p.getString("crumbLog", "") ?: ""
+                val di = (if (exit.isNotEmpty()) "== LAST PROCESS EXIT / NATIVE TRACE ==\n$exit\n\n" else "") +
+                    (if (crumbs.isNotEmpty()) "== RECENT VREMOTE BREADCRUMBS ==\n$crumbs\n\n" else "") +
+                    (try { DeviceInfo.report() } catch (_: Throwable) { "" })
                 val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | flow=" + (p.getString("flow", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | exit=" + exit.lineSequence().firstOrNull().orEmpty() + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
                 val a = ApiClient.announce(base, machineCode, ApiClient.sha256(sessionPw), if (personal.isNotEmpty()) ApiClient.sha256(personal) else "", requireAccept, di, ev)
                 p.edit().putString("deviceId", a.deviceId).putString("deviceToken", a.deviceToken)
@@ -283,7 +286,12 @@ class MainActivity : Activity() {
 
     /** Collect device + MediaCodec encoder capabilities, copy to clipboard, and show for screenshot/paste. */
     private fun showDeviceInfo() {
-        val txt = try { DeviceInfo.report() } catch (e: Throwable) { "Lỗi thu thập: " + (e.message ?: e.toString()) }
+        val p = prefs()
+        val exit = p.getString("exitInfo", "") ?: ""
+        val crumbs = p.getString("crumbLog", "") ?: ""
+        val txt = (if (exit.isNotEmpty()) "== LAST PROCESS EXIT / NATIVE TRACE ==\n$exit\n\n" else "") +
+            (if (crumbs.isNotEmpty()) "== RECENT VREMOTE BREADCRUMBS ==\n$crumbs\n\n" else "") +
+            (try { DeviceInfo.report() } catch (e: Throwable) { "Lỗi thu thập: " + (e.message ?: e.toString()) })
         try { (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("vremote-device", txt)) } catch (_: Throwable) {}
         val tv = TextView(this).apply { text = txt; textSize = 11f; setTextIsSelectable(true); setPadding(32, 24, 32, 24) }
         AlertDialog.Builder(this).setTitle("Thông tin thiết bị (đã copy)").setView(ScrollView(this).apply { addView(tv) }).setPositiveButton("Đóng", null).show()
