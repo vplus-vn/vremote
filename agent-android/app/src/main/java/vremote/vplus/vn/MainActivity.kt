@@ -327,11 +327,11 @@ class MainActivity : Activity() {
                             stream.use { ins ->
                                 val bytes = ins.readBytes().take(12000).toByteArray()
                                 val full = String(bytes, Charsets.UTF_8)
-                                val printable = full.count { it == '\\n' || it == '\\r' || it == '\\t' || it.code >= 32 }.toDouble() / full.length.coerceAtLeast(1)
+                                val printable = full.count { it == '\n' || it == '\r' || it == '\t' || it.code >= 32 }.toDouble() / full.length.coerceAtLeast(1)
                                 if (bytes.isNotEmpty() && printable < 0.85) {
                                     // Android 12+ returns a protobuf tombstone, not plain text. Preserve a bounded
                                     // base64 payload so support can decode it offline with the platform schema.
-                                    trace = "traceFormat=tombstone-protobuf-base64\\n" +
+                                    trace = "traceFormat=tombstone-protobuf-base64\n" +
                                         android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP).take(6500)
                                     traceStatus = "binary trace/protobuf bytes=${bytes.size}; base64 bounded"
                                 } else if (full.isNotBlank()) {
@@ -348,7 +348,7 @@ class MainActivity : Activity() {
                                             t.contains("pc ", ignoreCase = true) ||
                                             t.contains("lr ", ignoreCase = true)
                                         )
-                                    }.take(48).joinToString("\\n")
+                                    }.take(48).joinToString("\n")
                                     trace = (lines.ifBlank { full }).takeLast(9000)
                                     traceStatus = "text trace chars=${full.length}"
                                 } else {
