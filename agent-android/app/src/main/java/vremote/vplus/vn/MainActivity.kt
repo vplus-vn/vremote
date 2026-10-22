@@ -325,9 +325,16 @@ class MainActivity : Activity() {
                         val stream = info.traceInputStream
                         if (stream != null) {
                             stream.use { ins ->
-                                val full = ins.bufferedReader().readText()
-                                if (full.isNotBlank()) {
-                                    // Preserve useful native details even when OEM tombstone formatting differs.
+                                val bytes = ins.readBytes().take(12000).toByteArray()
+                                val full = String(bytes, Charsets.UTF_8)
+                                val printable = full.count { it == '\\n' || it == '\\r' || it == '\\t' || it.code >= 32 }.toDouble() / full.length.coerceAtLeast(1)
+                                if (bytes.isNotEmpty() && printable < 0.85) {
+                                    // Android 12+ returns a protobuf tombstone, not plain text. Preserve a bounded
+                                    // base64 payload so support can decode it offline with the platform schema.
+                                    trace = "traceFormat=tombstone-protobuf-base64\\n" +
+                                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP).take(6500)
+                                    traceStatus = "binary trace/protobuf bytes=${bytes.size}; base64 bounded"
+                                } else if (full.isNotBlank()) {
                                     val lines = full.lineSequence().map { it.trim() }.filter { t ->
                                         t.isNotEmpty() && (
                                             t.contains("signal", ignoreCase = true) ||
@@ -341,9 +348,9 @@ class MainActivity : Activity() {
                                             t.contains("pc ", ignoreCase = true) ||
                                             t.contains("lr ", ignoreCase = true)
                                         )
-                                    }.take(48).joinToString("\n")
+                                    }.take(48).joinToString("\\n")
                                     trace = (lines.ifBlank { full }).takeLast(9000)
-                                    traceStatus = "traceInputStream returned ${full.length} chars"
+                                    traceStatus = "text trace chars=${full.length}"
                                 } else {
                                     traceStatus = "traceInputStream empty"
                                 }
