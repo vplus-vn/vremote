@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins { id("com.android.application"); kotlin("android") }
 
 android { namespace = "vremote.vplus.vn"; compileSdk = 35
-    // [v0.0.31] Issue #148 — preserve native exit metadata and best-effort crash logcat (2026-10-22).
-    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 31; versionName = "0.0.31" }
+    // [v0.0.32] Issue #148 — fix rejected-video ICE MID parsing and synchronize candidate filtering (2026-10-22).
+    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 32; versionName = "0.0.32" }
     buildFeatures { buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
@@ -61,7 +61,7 @@ val hardenIssue148 by tasks.registering {
         val newHandleCandidate = """    private fun handleCandidate(m: JSONObject) {
         val c = m.optJSONObject("candidate") ?: return
         val mid = c.optString("sdpMid", "")
-        if (videoMode == "mjpeg" && mid.isNotBlank() && rejectedRemoteVideoMids.contains(mid)) {
+        if (videoMode == "mjpeg" && mid.isNotBlank() && synchronized(rejectedRemoteVideoMids) { rejectedRemoteVideoMids.contains(mid) }) {
             crumb("ice:drop-rejected-video mid=${'$'}mid")
             return
         }
@@ -87,7 +87,7 @@ val hardenIssue148 by tasks.registering {
             synchronized(rejectedRemoteVideoMids) {
                 rejectedRemoteVideoMids.clear()
                 var inVideo = false
-                sdp.split("\\r\\n").forEach { line ->
+                sdp.split("\r\n").forEach { line ->
                     if (line.startsWith("m=")) inVideo = line.startsWith("m=video")
                     if (inVideo && line.startsWith("a=mid:")) rejectedRemoteVideoMids.add(line.removePrefix("a=mid:"))
                 }
