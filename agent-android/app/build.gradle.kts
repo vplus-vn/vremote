@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins { id("com.android.application"); kotlin("android") }
 
 android { namespace = "vremote.vplus.vn"; compileSdk = 35
-    // [v0.0.30] Issue #148 — bump APK version so Chau can verify the latest crash-diagnostic build (2026-10-22).
-    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 30; versionName = "0.0.30" }
+    // [v0.0.31] Issue #148 — preserve native exit metadata and best-effort crash logcat (2026-10-22).
+    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 31; versionName = "0.0.31" }
     buildFeatures { buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
