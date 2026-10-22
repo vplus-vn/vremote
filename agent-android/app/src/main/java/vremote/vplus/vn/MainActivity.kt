@@ -60,6 +60,7 @@ class MainActivity : Activity() {
         // Pull the REAL native crash (tombstone) of the previous process from Android 11's
         // ApplicationExitInfo — the definitive stack for the intermittent SIGSEGV that breadcrumbs can't pin.
         captureExitInfo(p)
+        captureCrashLogcat(p)
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 40, 32, 32) }
         // Header: app name (left) + version badge in the top corner, so the running build is obvious.
@@ -209,7 +210,9 @@ class MainActivity : Activity() {
                 // console without the tester pasting anything (helps pin the first-frame encode crash).
                 val exit = p.getString("exitInfo", "") ?: ""
                 val crumbs = p.getString("crumbLog", "") ?: ""
+                val crashLogcat = p.getString("crashLogcat", "") ?: ""
                 val di = (if (exit.isNotEmpty()) "== LAST PROCESS EXIT / NATIVE TRACE ==\n$exit\n\n" else "") +
+                    (if (crashLogcat.isNotEmpty()) "== BEST-EFFORT CRASH LOGCAT (may be denied by Android) ==\n$crashLogcat\n\n" else "") +
                     (if (crumbs.isNotEmpty()) "== RECENT VREMOTE BREADCRUMBS ==\n$crumbs\n\n" else "") +
                     (try { DeviceInfo.report() } catch (_: Throwable) { "" })
                 val ev = ("prevCrumb=" + (p.getString("prevCrumb", "") ?: "") + " | crumb=" + (p.getString("crumb", "") ?: "") + " | flow=" + (p.getString("flow", "") ?: "") + " | boot=" + (p.getString("boot", "") ?: "") + " | exit=" + exit.lineSequence().firstOrNull().orEmpty() + " | crash=" + (p.getString("lastCrash", "") ?: "").lineSequence().firstOrNull().orEmpty()).take(500)
@@ -306,33 +309,86 @@ class MainActivity : Activity() {
         autoSharePrompted = false // re-arm so the encoder/quality change re-pops the share dialog
         v.postDelayed({ startAgentService(null); refreshReady(); maybeAutoShare() }, 700)
     }
-    /** Read the previous process's real native crash (tombstone) via Android 11 ApplicationExitInfo. */
+    /** Read Android's historical exit record. Some OEM builds return metadata but no tombstone stream. */
     private fun captureExitInfo(p: android.content.SharedPreferences) {
         if (Build.VERSION.SDK_INT < 30) return
         try {
             val am = getSystemService(ActivityManager::class.java) ?: return
-            val infos = am.getHistoricalProcessExitReasons(packageName, 0, 6)
+            val infos = am.getHistoricalProcessExitReasons(packageName, 0, 8)
             for (info in infos) {
                 val r = info.reason
                 if (r == ApplicationExitInfo.REASON_CRASH_NATIVE || r == ApplicationExitInfo.REASON_SIGNALED || r == ApplicationExitInfo.REASON_CRASH) {
-                    val head = "exit r=$r st=${info.status} @${info.timestamp / 1000 % 100000} desc=${info.description ?: ""}"
+                    val head = "exit r=$r st=${info.status} @${info.timestamp / 1000 % 100000} desc=${info.description ?: ""} importance=${info.importance} pssKb=${info.pss} rssKb=${info.rss}"
                     var trace = ""
+                    var traceStatus = "traceInputStream unavailable"
                     try {
-                        info.traceInputStream?.use { ins ->
-                            val full = ins.bufferedReader().readText()
-                            // Keep the signal line + native backtrace frames (the diagnostic core of a tombstone).
-                            val keep = full.lineSequence().map { it.trim() }.filter { t ->
-                                t.startsWith("signal ") || t.contains("Abort message") || t.startsWith("backtrace") || Regex("^#\\d+ ").containsMatchIn(t)
-                            }.take(24).joinToString("\n")
-                            trace = keep.ifBlank { full.take(1500) }
+                        val stream = info.traceInputStream
+                        if (stream != null) {
+                            stream.use { ins ->
+                                val full = ins.bufferedReader().readText()
+                                if (full.isNotBlank()) {
+                                    // Preserve useful native details even when OEM tombstone formatting differs.
+                                    val lines = full.lineSequence().map { it.trim() }.filter { t ->
+                                        t.isNotEmpty() && (
+                                            t.contains("signal", ignoreCase = true) ||
+                                            t.contains("Abort message", ignoreCase = true) ||
+                                            t.contains("backtrace", ignoreCase = true) ||
+                                            t.contains("tombstone", ignoreCase = true) ||
+                                            t.contains("libwebrtc", ignoreCase = true) ||
+                                            t.contains("libjingle", ignoreCase = true) ||
+                                            t.contains("libc.so", ignoreCase = true) ||
+                                            Regex("^#\\d+\\s").containsMatchIn(t) ||
+                                            t.contains("pc ", ignoreCase = true) ||
+                                            t.contains("lr ", ignoreCase = true)
+                                        )
+                                    }.take(48).joinToString("\n")
+                                    trace = (lines.ifBlank { full }).takeLast(9000)
+                                    traceStatus = "traceInputStream returned ${full.length} chars"
+                                } else {
+                                    traceStatus = "traceInputStream empty"
+                                }
+                            }
                         }
-                    } catch (_: Throwable) {}
-                    p.edit().putString("exitInfo", (head + "\n" + trace).take(3500)).apply()
+                    } catch (e: Throwable) {
+                        traceStatus = "traceInputStream error: ${e.javaClass.simpleName}: ${e.message ?: ""}".take(300)
+                    }
+                    p.edit().putString("exitInfo", (head + "\ntraceStatus=" + traceStatus + "\n" + trace).take(10000)).apply()
                     return
                 }
             }
-            p.edit().remove("exitInfo").apply()
+            // Keep previous native-exit data until a later actual crash replaces it.
         } catch (_: Throwable) {}
+    }
+
+    /**
+     * Best-effort fallback for OEMs that expose ApplicationExitInfo metadata but no trace stream.
+     * Android may deny logcat access to ordinary apps; record that explicitly rather than failing.
+     * Only crash-related lines for this package / native stack markers are retained.
+     */
+    private fun captureCrashLogcat(p: android.content.SharedPreferences) {
+        try {
+            val process = ProcessBuilder("logcat", "-b", "crash", "-d", "-v", "threadtime")
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().use { it.readText().takeLast(30000) }
+            val finished = try { process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Throwable) { false }
+            if (!finished) process.destroyForcibly()
+            val lines = output.lineSequence().toList()
+            val relevant = lines.filter { line ->
+                val lower = line.lowercase()
+                (lower.contains(packageName.lowercase()) ||
+                 lower.contains("fatal signal") || lower.contains("abort message") ||
+                 lower.contains("tombstone") || lower.contains("debuggerd") ||
+                 lower.contains("libwebrtc") || lower.contains("libjingle") ||
+                 lower.contains("signal 6") || lower.contains("signal 11") ||
+                 Regex("^.*#\\d+\\s").containsMatchIn(line))
+            }.takeLast(100).joinToString("\n")
+            val status = if (output.isBlank()) "logcat crash buffer empty or access denied"
+                         else if (relevant.isBlank()) "logcat readable; no matching crash lines"
+                         else "captured ${relevant.length} chars"
+            p.edit().putString("crashLogcat", ("status=" + status + "\n" + relevant).take(9000)).apply()
+        } catch (e: Throwable) {
+            p.edit().putString("crashLogcat", "logcat unavailable: ${e.javaClass.simpleName}: ${e.message ?: ""}".take(500)).apply()
+        }
     }
     private fun label(t: String) = TextView(this).apply { text = t; setTextColor(0xFF6B7280.toInt()); setPadding(0, 20, 0, 4) }
     private fun randomPw(n: Int = 6): String { val r = SecureRandom(); return (1..n).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("") }
