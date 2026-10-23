@@ -106,7 +106,103 @@ val hardenIssue148 by tasks.registering {
                     val queued = pendingRemoteCandidates.toList()
                     pendingRemoteCandidates.clear()
                     queued.forEach { candidate ->
-                        try { pc.addIceCandidate(candidate) } catch (_: Throwable) { crumb("ice:add-queued-fail") }
+                        val rejectedVideo = videoMode == "mjpeg" &&
+                            candidate.sdpMid?.let { mid ->
+                                synchronized(rejectedRemoteVideoMids) { rejectedRemoteVideoMids.contains(mid) }
+                            } == true
+                        if (rejectedVideo) {
+                            crumb("ice:drop-queued-rejected-video mid=${'
+                }
+                crumb("offer:remote ok")
+                pc.createAnswer"""
+        if (oldRemoteSuccess in s) s = s.replace(oldRemoteSuccess, newRemoteSuccess)
+
+        // Do not emit trickled local candidates before the answer. This keeps the remote side from
+        // processing candidates against an answer it has not installed yet.
+        val oldSuccess = "override fun onSetSuccess() { crumb(\"offer:local ok ${'$'}{cfg()}\") }"
+        val newSuccess = """override fun onSetSuccess() {
+                                    localDescriptionReady = true
+                                    val queued = synchronized(pendingIceCandidates) {
+                                        val copy = pendingIceCandidates.toList()
+                                        pendingIceCandidates.clear()
+                                        copy
+                                    }
+                                    sendSignal(
+                                        JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                            "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
+                                        )
+                                    )
+                                    queued.forEach { candidate ->
+                                        sendSignal(
+                                            JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                                "payload", JSONObject().put("type", "candidate").put("sessionId", activeSession).put(
+                                                    "candidate", JSONObject().put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex).put("candidate", candidate.sdp)
+                                                )
+                                            )
+                                        )
+                                    }
+                                    crumb("offer:local ok ${'$'}{cfg()}")
+                                }"""
+        if (oldSuccess in s) s = s.replace(oldSuccess, newSuccess)
+
+        val oldAnswerSend = """                            sendSignal(
+                                JSONObject().put("type", "agent.signaling").put("sessionId", activeSession).put(
+                                    "payload", JSONObject().put("type", "answer").put("sessionId", activeSession).put("sdp", fixed.description)
+                                )
+                            )
+"""
+        if (oldAnswerSend in s) s = s.replace(oldAnswerSend, "")
+
+        // Critical MJPEG SDP fix: reject the offered video m-line instead of deleting it.
+        // Deleting it leaves the BUNDLE group / m-line ordering inconsistent and can trigger
+        // libwebrtc native aborts on the network thread immediately after local SDP succeeds.
+        val oldVideoStrip = """            for (line in lines) {
+                if (line.startsWith("m=")) inVideo = line.startsWith("m=video")
+                if (inVideo) continue
+                out.add(line)
+            }
+            out.joinToString("\\r\\n")
+"""
+        val newVideoReject = """            for (line in lines) {
+                if (line.startsWith("m=")) {
+                    inVideo = line.startsWith("m=video")
+                    if (inVideo) {
+                        val parts = line.split(" ").toMutableList()
+                        if (parts.size > 1) parts[1] = "0"
+                        out.add(parts.joinToString(" "))
+                        continue
+                    }
+                }
+                out.add(line)
+            }
+            out.joinToString("\\r\\n")
+"""
+        if (oldVideoStrip in s && "parts[1] = \"0\"" !in s) s = s.replace(oldVideoStrip, newVideoReject)
+
+        val oldEnd = "        activeSession = null\n        activeCapability = null\n"
+        val newEnd = "        activeSession = null\n        activeCapability = null\n        remoteDescriptionReady = false\n        localDescriptionReady = false\n        synchronized(pendingRemoteCandidates) { pendingRemoteCandidates.clear() }\n        synchronized(pendingIceCandidates) { pendingIceCandidates.clear() }\n"
+        if (oldEnd in s && "pendingRemoteCandidates.clear()" !in s) s = s.replace(oldEnd, newEnd)
+
+        // Extra Issue #148 guard: reject trickled candidates belonging to video m-lines that the
+        // MJPEG answer explicitly rejects, and keep answer-before-candidate ordering deterministic.
+        p.writeText(s)
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn(hardenIssue148) }
+
+dependencies {
+    implementation("androidx.core:core:1.13.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.squareup.okhttp3:okhttp:5.1.0")
+    implementation("io.github.webrtc-sdk:android:150.7871.01")
+    testImplementation("org.jetbrains.kotlin:kotlin-test:2.2.20")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+}
+}{candidate.sdpMid}")
+                        } else {
+                            try { pc.addIceCandidate(candidate) } catch (_: Throwable) { crumb("ice:add-queued-fail") }
+                        }
                     }
                 }
                 crumb("offer:remote ok")
