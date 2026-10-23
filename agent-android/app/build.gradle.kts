@@ -111,7 +111,11 @@ val hardenIssue148 by tasks.registering {
                                 synchronized(rejectedRemoteVideoMids) { rejectedRemoteVideoMids.contains(mid) }
                             } == true
                         if (rejectedVideo) {
-                            crumb("ice:drop-queued-rejected-video mid=${'
+                            crumb("ice:drop-queued-rejected-video mid=${'$' }{candidate.sdpMid}")
+                        } else {
+                            try { pc.addIceCandidate(candidate) } catch (_: Throwable) { crumb("ice:add-queued-fail") }
+                        }
+                    }
                 }
                 crumb("offer:remote ok")
                 pc.createAnswer"""
