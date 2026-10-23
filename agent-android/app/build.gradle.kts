@@ -4,7 +4,7 @@ plugins { id("com.android.application"); kotlin("android") }
 
 android { namespace = "vremote.vplus.vn"; compileSdk = 35
     // [v0.0.32] Issue #148 — fix rejected-video ICE MID parsing and synchronize candidate filtering (2026-10-22).
-    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 32; versionName = "0.0.32" }
+    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 33; versionName = "0.0.33" }
     buildFeatures { buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
