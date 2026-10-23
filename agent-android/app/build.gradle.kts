@@ -4,7 +4,7 @@ plugins { id("com.android.application"); kotlin("android") }
 
 android { namespace = "vremote.vplus.vn"; compileSdk = 35
     // [v0.0.32] Issue #148 — fix rejected-video ICE MID parsing and synchronize candidate filtering (2026-10-22).
-    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 32; versionName = "0.0.32" }
+    defaultConfig { applicationId = "vremote.vplus.vn"; minSdk = 26; targetSdk = 35; versionCode = 33; versionName = "0.0.33" }
     buildFeatures { buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
@@ -106,7 +106,15 @@ val hardenIssue148 by tasks.registering {
                     val queued = pendingRemoteCandidates.toList()
                     pendingRemoteCandidates.clear()
                     queued.forEach { candidate ->
-                        try { pc.addIceCandidate(candidate) } catch (_: Throwable) { crumb("ice:add-queued-fail") }
+                        val rejectedVideo = videoMode == "mjpeg" &&
+                            candidate.sdpMid?.let { mid ->
+                                synchronized(rejectedRemoteVideoMids) { rejectedRemoteVideoMids.contains(mid) }
+                            } == true
+                        if (rejectedVideo) {
+                            crumb("ice:drop-queued-rejected-video mid=${'$' }{candidate.sdpMid}")
+                        } else {
+                            try { pc.addIceCandidate(candidate) } catch (_: Throwable) { crumb("ice:add-queued-fail") }
+                        }
                     }
                 }
                 crumb("offer:remote ok")
